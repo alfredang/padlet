@@ -4,9 +4,6 @@
 .env
 .env.local
 
-# Firebase config (contains API key — keep local)
-js/config.js
-
 # Local tool state
 .claude/
 .mcp.json
