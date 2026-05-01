@@ -1,0 +1,54 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = "file:./dev.db"
+}
+
+model Board {
+  id          String   @id @default(cuid())
+  title       String
+  description String?
+  background  String   @default("#fef3c7")
+  layout      String   @default("grid")
+  isTrashed   Boolean  @default(false)
+  isFavourite Boolean  @default(false)
+  sectionsJson String?
+  folderId    String?
+  folder      Folder?  @relation(fields: [folderId], references: [id], onDelete: SetNull)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  posts       Post[]
+
+  @@index([folderId])
+  @@index([isTrashed])
+}
+
+model Folder {
+  id        String   @id @default(cuid())
+  name      String
+  createdAt DateTime @default(now())
+  boards    Board[]
+}
+
+model Post {
+  id              String   @id @default(cuid())
+  title           String?
+  body            String
+  color           String   @default("#fffbeb")
+  imageUrl        String?
+  linkUrl         String?
+  linkTitle       String?
+  linkDescription String?
+  linkImage       String?
+  author          String?
+  section         String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  boardId         String
+  board           Board    @relation(fields: [boardId], references: [id], onDelete: Cascade)
+
+  @@index([boardId])
+}
