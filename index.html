@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Sustainable Cities Tutorial</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <header class="app-header">
+    <h1 id="board-title">Loading…</h1>
+    <div class="online-status" id="online-status"><span class="online-dot"></span><span id="online-label">Online classroom board</span></div>
+    <div class="user-area" id="user-area"></div>
+  </header>
+
+  <section class="announcement hidden" id="announcement">
+    <span class="icon">📢</span>
+    <span class="text" id="announcement-text"></span>
+    <button class="btn-ghost" id="announcement-edit" hidden>Edit</button>
+  </section>
+
+  <section class="toolbar">
+    <input id="search" type="text" placeholder="Search posts…" />
+    <select id="category-filter">
+      <option value="">All categories</option>
+    </select>
+    <select id="sort">
+      <option value="newest">Newest first</option>
+      <option value="oldest">Oldest first</option>
+      <option value="liked">Most liked</option>
+    </select>
+    <button class="btn btn-secondary" id="export-csv" hidden>Export CSV</button>
+  </section>
+
+  <main class="board" id="board"></main>
+
+  <footer class="app-footer">
+    Powered by <a href="https://www.tertiarycourses.com.sg/" target="_blank" rel="noopener">Tertiary Infotech Academy Pte Ltd</a>
+  </footer>
+
+  <button class="fab" id="fab" title="Add a post" hidden>+</button>
+
+  <div id="modal-root"></div>
+  <div id="toast-root"></div>
+
+  <script type="module" src="js/main.js"></script>
+</body>
+</html>
