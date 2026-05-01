@@ -22,6 +22,7 @@ const state = {
 };
 
 document.getElementById("board-title").textContent = DEFAULT_BOARD_TITLE;
+document.getElementById("board-title-edit").onclick = openBoardTitleEditor;
 applyTheme();
 populateCategoryFilter();
 wireToolbar();
@@ -86,7 +87,6 @@ function handleAuthChange(user) {
     document.getElementById("export-csv").hidden = true;
     document.getElementById("board").innerHTML = "";
     document.getElementById("announcement").classList.add("hidden");
-    document.getElementById("board-title-edit").hidden = true;
     return;
   }
   closeModal();
@@ -94,8 +94,6 @@ function handleAuthChange(user) {
   const admin = isAdmin(user);
   document.getElementById("export-csv").hidden = !admin;
   document.getElementById("announcement-edit").hidden = !admin;
-  document.getElementById("board-title-edit").hidden = false;
-  document.getElementById("board-title-edit").onclick = openBoardTitleEditor;
   state.unsubPosts = subscribePosts((items, err) => {
     if (err) { toast("Failed to load posts: " + (err.message || err.code), "error"); return; }
     state.posts = items;
@@ -111,10 +109,18 @@ function handleAuthChange(user) {
   });
 }
 
-function openBoardTitleEditor() {
+async function openBoardTitleEditor() {
+  if (!state.user) {
+    try {
+      await signInAnon("");
+    } catch (e) {
+      toast("Sign-in failed: " + (e.message || e.code), "error");
+      return;
+    }
+  }
   const cur = document.getElementById("board-title").textContent;
   const input = el("input", { type: "text", placeholder: "Board title" });
-  input.value = cur || "";
+  input.value = cur && cur !== DEFAULT_BOARD_TITLE ? cur : "";
   const node = el("div", null,
     el("h2", null, "Edit board title"),
     input,
