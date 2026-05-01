@@ -83,13 +83,13 @@ export default function BoardGrid({
         {showCreate && (
           <button
             onClick={() => setOpen(true)}
-            className="group rounded-2xl border-2 border-dashed border-slate-300 hover:border-violet-400 hover:bg-violet-50/40 p-6 min-h-[200px] flex flex-col items-center justify-center text-slate-500 hover:text-violet-700 transition animate-pop-in"
+            className="group rounded-2xl border-2 border-dashed border-slate-300 dark:border-slate-700 hover:border-violet-400 dark:hover:border-violet-500 hover:bg-violet-50/40 dark:hover:bg-violet-950/30 p-6 min-h-[200px] flex flex-col items-center justify-center text-slate-500 dark:text-slate-400 hover:text-violet-700 dark:hover:text-violet-400 transition animate-pop-in"
           >
-            <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-violet-100 via-fuchsia-100 to-pink-100 group-hover:scale-105 grid place-items-center mb-3 transition shadow-sm">
-              <Plus size={26} className="text-violet-600" />
+            <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-violet-100 via-fuchsia-100 to-pink-100 dark:from-violet-900/40 dark:via-fuchsia-900/40 dark:to-pink-900/40 group-hover:scale-105 grid place-items-center mb-3 transition shadow-sm">
+              <Plus size={26} className="text-violet-600 dark:text-violet-400" />
             </div>
             <span className="font-semibold">Create new board</span>
-            <span className="text-xs text-slate-400 mt-1">Blank canvas to start collecting</span>
+            <span className="text-xs text-slate-400 dark:text-slate-500 mt-1">Blank canvas to start collecting</span>
           </button>
         )}
 
@@ -173,7 +173,7 @@ export default function BoardGrid({
       </div>
 
       {filtered.length === 0 && (
-        <div className="text-center py-24 text-slate-400">
+        <div className="text-center py-24 text-slate-400 dark:text-slate-500">
           {query ? `No boards match "${query}"` : emptyText ?? "Nothing here yet."}
         </div>
       )}

@@ -88,7 +88,7 @@ export default function TemplateModal({
       onClick={onClose}
     >
       <div
-        className="bg-white rounded-3xl shadow-2xl w-full max-w-3xl animate-pop-in overflow-hidden my-8"
+        className="bg-white dark:bg-slate-900 rounded-3xl shadow-2xl w-full max-w-3xl animate-pop-in overflow-hidden my-8"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="relative">
@@ -105,33 +105,33 @@ export default function TemplateModal({
               disabled={busy}
               className="inline-flex items-center gap-2 px-5 py-2.5 rounded-full bg-gradient-to-r from-pink-500 to-rose-500 hover:from-pink-600 hover:to-rose-600 text-white font-bold shadow-lg disabled:opacity-60"
             >
-              {busy ? (
-                <Loader2 size={16} className="animate-spin" />
-              ) : null}
+              {busy ? <Loader2 size={16} className="animate-spin" /> : null}
               {busy ? "Creating…" : "Create"}
             </button>
           </div>
 
-          <div className="relative aspect-[16/10] border-b border-slate-100 bg-slate-50">
+          <div className="relative aspect-[16/10] border-b border-slate-100 dark:border-slate-800 bg-slate-50 dark:bg-slate-800">
             <TemplatePreview template={template} variant="full" />
           </div>
         </div>
 
         <div className="p-6 sm:p-7">
           <div className="flex items-start justify-between gap-4">
-            <h2 className="text-2xl font-extrabold tracking-tight text-slate-900">
+            <h2 className="text-2xl font-extrabold tracking-tight text-slate-900 dark:text-slate-100">
               {template.name}
             </h2>
             <button
               onClick={create}
               disabled={busy}
-              className="text-sm font-bold text-slate-700 hover:underline shrink-0"
+              className="text-sm font-bold text-slate-700 dark:text-slate-300 hover:underline shrink-0"
             >
               See example
             </button>
           </div>
 
-          <p className="text-slate-600 mt-2 leading-relaxed">{template.description}</p>
+          <p className="text-slate-600 dark:text-slate-400 mt-2 leading-relaxed">
+            {template.description}
+          </p>
 
           <div className="flex flex-wrap gap-2 mt-5">
             {template.tags.map((t) => {
@@ -139,22 +139,24 @@ export default function TemplateModal({
               return (
                 <span
                   key={t}
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-slate-100 text-slate-700 text-xs font-semibold"
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 text-xs font-semibold"
                 >
-                  <Icon size={13} className="text-slate-500" />
+                  <Icon size={13} className="text-slate-500 dark:text-slate-400" />
                   {t}
                 </span>
               );
             })}
-            <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-violet-50 text-violet-700 text-xs font-semibold">
-              <Palette size={13} className="text-violet-500" />
+            <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-violet-50 dark:bg-violet-900/30 text-violet-700 dark:text-violet-300 text-xs font-semibold">
+              <Palette size={13} className="text-violet-500 dark:text-violet-400" />
               {template.category}
             </span>
           </div>
 
           {related.length > 0 && (
             <div className="mt-8">
-              <h3 className="text-sm font-bold text-slate-900 mb-3">Related</h3>
+              <h3 className="text-sm font-bold text-slate-900 dark:text-slate-100 mb-3">
+                Related
+              </h3>
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                 {related.map((r) => (
                   <button
@@ -162,10 +164,10 @@ export default function TemplateModal({
                     onClick={() => onPick(r)}
                     className="text-left group"
                   >
-                    <div className="aspect-[4/3] relative rounded-lg overflow-hidden border border-slate-200 group-hover:border-violet-300 group-hover:shadow-md transition">
+                    <div className="aspect-[4/3] relative rounded-lg overflow-hidden border border-slate-200 dark:border-slate-700 group-hover:border-violet-300 dark:group-hover:border-violet-600 group-hover:shadow-md transition">
                       <TemplatePreview template={r} variant="thumb" />
                     </div>
-                    <div className="mt-1.5 text-xs font-semibold text-slate-700 line-clamp-1">
+                    <div className="mt-1.5 text-xs font-semibold text-slate-700 dark:text-slate-300 line-clamp-1">
                       {r.name}
                     </div>
                   </button>
