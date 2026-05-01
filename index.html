@@ -4,14 +4,6 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Sustainable Cities Tutorial</title>
-<script>
-  (function () {
-    try {
-      var t = localStorage.getItem("theme") || "light";
-      if (t === "dark") document.documentElement.classList.add("dark");
-    } catch (e) {}
-  })();
-</script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -19,9 +11,14 @@
 </head>
 <body>
   <header class="app-header">
-    <h1 id="board-title">Loading…</h1>
-    <div class="online-status" id="online-status"><span class="online-dot"></span><span id="online-label">Online classroom board</span></div>
-    <div class="user-area" id="user-area"></div>
+    <div class="header-row-main">
+      <h1 id="board-title">Loading…</h1>
+      <button class="btn-ghost" id="board-title-edit" hidden title="Edit board title">✏️</button>
+    </div>
+    <div class="header-row-controls">
+      <div class="online-status" id="online-status"><span class="online-dot"></span><span id="online-label">Online classroom board</span></div>
+      <div class="user-area" id="user-area"></div>
+    </div>
   </header>
 
   <section class="announcement hidden" id="announcement">

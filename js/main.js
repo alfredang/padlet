@@ -1,8 +1,10 @@
-import { BOARD_TITLE, CATEGORIES, CATEGORY_COLORS } from "./config.js";
+import { CATEGORIES, CATEGORY_COLORS } from "./config.js";
+
+const DEFAULT_BOARD_TITLE = "Title Name";
 import { onAuthChange, signInAnon, signInGoogle, signOutUser, displayNameOf } from "./auth.js";
 import { subscribePosts, createPost, updatePost, deletePost, toggleLike, setPinned } from "./posts.js";
 import { subscribeComments, addComment, deleteComment } from "./comments.js";
-import { subscribeAnnouncement, setAnnouncement } from "./settings.js";
+import { subscribeAnnouncement, setAnnouncement, subscribeBoardTitle, setBoardTitle } from "./settings.js";
 import { isAdmin, exportCSV } from "./admin.js";
 import { el, escapeHtml, showModal, closeModal, toast, fileToDataUrl, formatRelativeTime } from "./ui.js";
 
@@ -14,20 +16,18 @@ const state = {
   sort: "newest",
   unsubPosts: null,
   unsubAnnouncement: null,
+  unsubBoardTitle: null,
   detailOpenFor: null,
   unsubDetailComments: null,
 };
 
-document.getElementById("board-title").textContent = BOARD_TITLE;
+document.getElementById("board-title").textContent = DEFAULT_BOARD_TITLE;
 applyTheme();
 populateCategoryFilter();
 wireToolbar();
 wireFab();
 wireOnlineStatus();
 onAuthChange(handleAuthChange);
-
-const SUN_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/></svg>';
-const MOON_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>';
 
 function applyTheme() {
   const t = localStorage.getItem("theme") || "light";
@@ -37,29 +37,6 @@ function toggleTheme() {
   const next = document.documentElement.classList.contains("dark") ? "light" : "dark";
   localStorage.setItem("theme", next);
   document.documentElement.classList.toggle("dark", next === "dark");
-}
-function buildThemeToggle() {
-  const sync = (btn) => {
-    const dark = document.documentElement.classList.contains("dark");
-    const label = dark ? "Switch to light mode" : "Switch to dark mode";
-    btn.innerHTML = dark ? MOON_SVG : SUN_SVG;
-    btn.title = label;
-    btn.setAttribute("aria-label", label);
-  };
-  const btn = el("button", {
-    class: "theme-toggle",
-    type: "button",
-    onclick: () => {
-      toggleTheme();
-      sync(btn);
-      btn.classList.remove("spinning");
-      void btn.offsetWidth;
-      btn.classList.add("spinning");
-      setTimeout(() => btn.classList.remove("spinning"), 500);
-    },
-  });
-  sync(btn);
-  return btn;
 }
 
 function populateCategoryFilter() {
@@ -100,6 +77,7 @@ function handleAuthChange(user) {
   state.user = user;
   if (state.unsubPosts) { state.unsubPosts(); state.unsubPosts = null; }
   if (state.unsubAnnouncement) { state.unsubAnnouncement(); state.unsubAnnouncement = null; }
+  if (state.unsubBoardTitle) { state.unsubBoardTitle(); state.unsubBoardTitle = null; }
   renderUserArea();
   wireOnlineStatus();
   if (!user) {
@@ -108,6 +86,7 @@ function handleAuthChange(user) {
     document.getElementById("export-csv").hidden = true;
     document.getElementById("board").innerHTML = "";
     document.getElementById("announcement").classList.add("hidden");
+    document.getElementById("board-title-edit").hidden = true;
     return;
   }
   closeModal();
@@ -115,6 +94,8 @@ function handleAuthChange(user) {
   const admin = isAdmin(user);
   document.getElementById("export-csv").hidden = !admin;
   document.getElementById("announcement-edit").hidden = !admin;
+  document.getElementById("board-title-edit").hidden = false;
+  document.getElementById("board-title-edit").onclick = openBoardTitleEditor;
   state.unsubPosts = subscribePosts((items, err) => {
     if (err) { toast("Failed to load posts: " + (err.message || err.code), "error"); return; }
     state.posts = items;
@@ -125,13 +106,40 @@ function handleAuthChange(user) {
     }
   });
   state.unsubAnnouncement = subscribeAnnouncement((text) => renderAnnouncement(text));
+  state.unsubBoardTitle = subscribeBoardTitle((title) => {
+    document.getElementById("board-title").textContent = title || DEFAULT_BOARD_TITLE;
+  });
+}
+
+function openBoardTitleEditor() {
+  const cur = document.getElementById("board-title").textContent;
+  const input = el("input", { type: "text", placeholder: "Board title" });
+  input.value = cur || "";
+  const node = el("div", null,
+    el("h2", null, "Edit board title"),
+    input,
+    el("div", { class: "modal-actions" },
+      el("button", { class: "btn btn-secondary", onclick: closeModal }, "Cancel"),
+      el("button", { class: "btn", onclick: async () => {
+        try { await setBoardTitle(input.value.trim()); toast("Title updated", "success"); closeModal(); }
+        catch (e) { toast("Failed: " + (e.message || e.code), "error"); }
+      }}, "Save"),
+    ),
+  );
+  showModal(node);
+  setTimeout(() => { input.focus(); input.select(); }, 50);
 }
 
 function renderUserArea() {
   const wrap = document.getElementById("user-area");
   wrap.innerHTML = "";
-  wrap.append(buildThemeToggle());
-  if (!state.user) return;
+  wrap.append(
+    el("button", { class: "btn-icon", onclick: toggleTheme, title: "Toggle theme" }, "🌓")
+  );
+  if (!state.user) {
+    wrap.append(el("button", { class: "btn", onclick: showSignInModal }, "Sign in"));
+    return;
+  }
   const name = displayNameOf(state.user);
   const initial = (name[0] || "?").toUpperCase();
   const chip = el("div", { class: "user-chip" });
@@ -386,35 +394,20 @@ function openComposer() {
   const descInput = el("textarea", { placeholder: "What's your idea, reflection, or answer?" });
   const linkInput = el("input", { type: "url", placeholder: "https:// (optional link)" });
   const catSelect = el("select", null, ...CATEGORIES.map((c) => el("option", { value: c }, c)));
-  const fileInput = el("input", { type: "file", accept: "image/*" });
-  const previewWrap = el("div", { class: "image-preview" });
-  let pickedFile = null;
-
-  fileInput.addEventListener("change", async () => {
-    const f = fileInput.files?.[0];
-    if (!f) { pickedFile = null; previewWrap.innerHTML = ""; return; }
-    if (f.size > 8 * 1024 * 1024) { toast("Image too large (max 8 MB)", "error"); fileInput.value = ""; return; }
-    pickedFile = f;
-    const url = await fileToDataUrl(f);
-    previewWrap.innerHTML = "";
-    const img = document.createElement("img");
-    img.src = url;
-    previewWrap.append(img);
-  });
 
   let submitting = false;
   const submitBtn = el("button", { class: "btn", onclick: async () => {
     if (submitting) return;
     const title = titleInput.value.trim();
     const description = descInput.value.trim();
-    if (!title && !description && !pickedFile) { toast("Add a title, description, or image", "error"); return; }
+    if (!title && !description) { toast("Add a title or description", "error"); return; }
     submitting = true;
     submitBtn.textContent = "Posting…";
     try {
       await createPost({
         title, description,
         category: catSelect.value,
-        file: pickedFile,
+        file: null,
         linkUrl: linkInput.value.trim(),
         authorName: displayNameOf(state.user),
       });
@@ -434,8 +427,6 @@ function openComposer() {
     el("label", null, "Description"), descInput,
     el("label", null, "Category"), catSelect,
     el("label", null, "Link (optional)"), linkInput,
-    el("label", null, "Image (optional)"), fileInput,
-    previewWrap,
     el("div", { class: "modal-actions" },
       el("button", { class: "btn btn-secondary", onclick: closeModal }, "Cancel"),
       submitBtn,
@@ -483,6 +474,7 @@ function openEdit(p) {
 function showSignInModal() {
   const nick = el("input", { type: "text", placeholder: "Nickname (optional)" });
   const node = el("div", null,
+    el("button", { class: "modal-close-btn", onclick: closeModal, title: "Close", "aria-label": "Close" }, "×"),
     el("h2", null, "Welcome to the classroom board"),
     el("p", { style: "color: var(--muted); font-size: 14px; margin: 0 0 8px;" },
       "Sign in to post, comment, and like. You can join as a guest or with Google."),
@@ -499,6 +491,6 @@ function showSignInModal() {
       }}, "🔑  Sign in with Google"),
     ),
   );
-  showModal(node, { persistent: true });
+  showModal(node);
   setTimeout(() => nick.focus(), 50);
 }

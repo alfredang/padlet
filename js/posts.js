@@ -11,7 +11,7 @@ import { db, storage, auth } from "./firebase.js";
 const POSTS = collection(db, "posts");
 
 export function subscribePosts(cb) {
-  const q = query(POSTS, orderBy("pinned", "desc"), orderBy("createdAt", "desc"));
+  const q = query(POSTS, orderBy("createdAt", "desc"));
   return onSnapshot(q, (snap) => {
     const items = [];
     snap.forEach((d) => items.push({ id: d.id, ...d.data() }));
