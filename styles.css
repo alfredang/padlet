@@ -254,7 +254,7 @@ a:hover { text-decoration: underline; }
   object-fit: cover;
 }
 .post .post-title { font-size: 16px; font-weight: 700; margin: 0 0 6px; line-height: 1.3; word-break: break-word; }
-.post .post-body { font-size: 14px; line-height: 1.5; color: var(--foreground); margin: 0 0 10px; white-space: pre-wrap; word-break: break-word; opacity: 0.85; }
+.post .post-body { font-size: 14px; line-height: 1.5; color: var(--foreground); margin: 0 0 10px; white-space: pre-wrap; word-break: break-word; opacity: 1; }
 .post .post-link {
   font-size: 13px;
   color: var(--accent);
@@ -516,6 +516,53 @@ a:hover { text-decoration: underline; }
   color: var(--muted);
 }
 .empty-state h2 { color: var(--foreground); margin: 0 0 8px; }
+
+/* Landing page (Create / Join classroom) */
+.landing {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 20px;
+  max-width: 900px;
+  margin: 40px auto;
+  padding: 0 16px;
+  column-span: all;
+}
+.landing-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 24px;
+  box-shadow: var(--shadow);
+}
+.landing-card h2 { margin: 0 0 8px; font-size: 18px; }
+.landing-hint { color: var(--muted); font-size: 13px; margin: 0 0 16px; line-height: 1.5; }
+.landing-card label { display: block; font-size: 13px; font-weight: 600; margin-bottom: 6px; margin-top: 12px; }
+.landing-card input {
+  width: 100%;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  color: var(--foreground);
+  outline: none;
+}
+.landing-card input:focus { border-color: var(--accent); }
+.landing-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 16px;
+  flex-wrap: wrap;
+}
+.landing-actions .btn { flex: 1; min-width: 140px; }
+
+/* Room code in title */
+.room-code {
+  font-size: 13px;
+  color: var(--muted);
+  font-weight: 500;
+  letter-spacing: 0.05em;
+  font-family: ui-monospace, SFMono-Regular, monospace;
+}
 
 /* Animations */
 @keyframes pop-in {

@@ -13,7 +13,7 @@
   <header class="app-header">
     <div class="header-row-main">
       <h1 id="board-title">Loading…</h1>
-      <button class="btn-ghost" id="board-title-edit" title="Edit board title">✏️</button>
+      <button class="btn-ghost" id="board-title-edit" hidden title="Edit board title">✏️</button>
     </div>
     <div class="header-row-controls">
       <div class="online-status" id="online-status"><span class="online-dot"></span><span id="online-label">Online classroom board</span></div>
@@ -27,11 +27,8 @@
     <button class="btn-ghost" id="announcement-edit" hidden>Edit</button>
   </section>
 
-  <section class="toolbar">
+  <section class="toolbar" id="toolbar" hidden>
     <input id="search" type="text" placeholder="Search posts…" />
-    <select id="category-filter">
-      <option value="">All categories</option>
-    </select>
     <select id="sort">
       <option value="newest">Newest first</option>
       <option value="oldest">Oldest first</option>

@@ -1,9 +1,3 @@
-import { ADMIN_EMAILS } from "./config.js";
-
-export function isAdmin(user) {
-  return !!user?.email && ADMIN_EMAILS.includes(user.email);
-}
-
 function csvEscape(v) {
   if (v == null) return "";
   const s = String(v);
@@ -19,13 +13,13 @@ function tsToISO(t) {
 }
 
 export function exportCSV(posts) {
-  const headers = ["id", "title", "description", "category", "authorName", "authorId", "likes", "pinned", "linkUrl", "imageUrl", "createdAt", "updatedAt"];
+  const headers = ["id", "title", "description", "category", "authorName", "authorId", "likes", "pinned", "linkUrl", "createdAt", "updatedAt"];
   const rows = [headers.join(",")];
   for (const p of posts) {
     rows.push([
       p.id, p.title, p.description, p.category, p.authorName, p.authorId,
       (p.likes || []).length, p.pinned ? "true" : "false",
-      p.linkUrl, p.imageUrl, tsToISO(p.createdAt), tsToISO(p.updatedAt),
+      p.linkUrl, tsToISO(p.createdAt), tsToISO(p.updatedAt),
     ].map(csvEscape).join(","));
   }
   const blob = new Blob([rows.join("\n")], { type: "text/csv;charset=utf-8" });

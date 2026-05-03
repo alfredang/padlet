@@ -18,10 +18,11 @@ export function subscribeComments(postId, cb) {
   });
 }
 
-export async function addComment(postId, text) {
+export async function addComment(roomId, postId, text) {
   const user = auth.currentUser;
   if (!user) throw new Error("not signed in");
   await addDoc(COMMENTS, {
+    roomId,
     postId,
     authorId: user.uid,
     authorName: user.displayName || (user.email ? user.email.split("@")[0] : "Guest"),
@@ -30,6 +31,6 @@ export async function addComment(postId, text) {
   });
 }
 
-export async function deleteComment(id) {
-  await deleteDoc(doc(db, "comments", id));
+export async function deleteComment(commentId) {
+  await deleteDoc(doc(db, "comments", commentId));
 }

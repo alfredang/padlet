@@ -10,10 +10,6 @@ export const FIREBASE_CONFIG = {
   appId: "REPLACE_ME",
 };
 
-export const ADMIN_EMAILS = []; // teacher / admin email addresses
-
-export const BOARD_TITLE = "Week 12 Sustainable Cities Tutorial: T53_56";
-
 export const CATEGORIES = [
   "Urban Planning",
   "Green Transport",
