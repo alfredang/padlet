@@ -601,8 +601,46 @@ function buildSectionColumn(section, posts, trainer) {
       el("button", { class: "btn-ghost", title: "Rename", onclick: (e) => { e.stopPropagation(); openRenameSectionModal(section); } }, "✏️"),
       el("button", { class: "btn-ghost", title: "Delete", onclick: (e) => { e.stopPropagation(); confirmDeleteSection(section); } }, "🗑"),
     ));
+    // Section reordering — trainer drags a section by its header onto another
+    header.draggable = true;
+    header.style.cursor = "grab";
+    header.addEventListener("dragstart", (e) => {
+      e.dataTransfer.setData("application/x-section-id", section.id);
+      e.dataTransfer.effectAllowed = "move";
+      header.classList.add("dragging");
+    });
+    header.addEventListener("dragend", () => header.classList.remove("dragging"));
   }
   col.append(header);
+
+  // Trainer drop target on the column itself: dropping a section onto this column reorders
+  if (trainer && section.id) {
+    col.addEventListener("dragover", (e) => {
+      if (Array.from(e.dataTransfer.types).includes("application/x-section-id")) {
+        e.preventDefault();
+        col.classList.add("section-drop-target");
+      }
+    });
+    col.addEventListener("dragleave", () => col.classList.remove("section-drop-target"));
+    col.addEventListener("drop", async (e) => {
+      if (!Array.from(e.dataTransfer.types).includes("application/x-section-id")) return;
+      e.preventDefault();
+      col.classList.remove("section-drop-target");
+      const draggedId = e.dataTransfer.getData("application/x-section-id");
+      if (!draggedId || draggedId === section.id) return;
+      const dragged = state.sections.find((s) => s.id === draggedId);
+      if (!dragged) return;
+      // Swap orders so the dragged section takes this section's position
+      try {
+        await Promise.all([
+          updateSection(draggedId, { order: section.order || 0 }),
+          updateSection(section.id, { order: dragged.order || 0 }),
+        ]);
+      } catch (err) {
+        toast("Reorder failed: " + (err.message || err.code), "error");
+      }
+    });
+  }
 
   // "Add post here" button — opens composer with this section pre-selected
   if (state.user) {
@@ -610,8 +648,31 @@ function buildSectionColumn(section, posts, trainer) {
       "+ Add post"));
   }
 
-  // Posts in this section
+  // Posts in this section — drop target for moving posts between sections
   const postsWrap = el("div", { class: "section-posts" });
+  postsWrap.addEventListener("dragover", (e) => {
+    if (Array.from(e.dataTransfer.types).includes("application/x-post-id")) {
+      e.preventDefault();
+      postsWrap.classList.add("post-drop-target");
+    }
+  });
+  postsWrap.addEventListener("dragleave", () => postsWrap.classList.remove("post-drop-target"));
+  postsWrap.addEventListener("drop", async (e) => {
+    if (!Array.from(e.dataTransfer.types).includes("application/x-post-id")) return;
+    e.preventDefault();
+    postsWrap.classList.remove("post-drop-target");
+    const postId = e.dataTransfer.getData("application/x-post-id");
+    if (!postId) return;
+    const movedPost = state.posts.find((p) => p.id === postId);
+    if (!movedPost) return;
+    if (movedPost.sectionId === section.id) return; // already here
+    try {
+      await updatePost(postId, { sectionId: section.id || null });
+      toast("Moved", "success");
+    } catch (err) {
+      toast("Move failed — only the post's author can move it", "error");
+    }
+  });
   if (posts.length === 0) {
     postsWrap.append(el("div", { class: "section-empty" }, "No posts yet"));
   } else {
@@ -677,7 +738,17 @@ function confirmDeleteSection(section) {
 
 function postCard(p) {
   const liked = !!state.user && (p.likes || []).includes(state.user.uid);
-  const card = el("div", { class: "post" + (p.pinned ? " pinned" : ""), onclick: () => openDetail(p) });
+  const isOwn = state.user && state.user.uid === p.authorId;
+  const card = el("div", { class: "post" + (p.pinned ? " pinned" : "") + (isOwn ? " draggable" : ""), onclick: () => openDetail(p) });
+  if (isOwn) {
+    card.draggable = true;
+    card.addEventListener("dragstart", (e) => {
+      e.dataTransfer.setData("application/x-post-id", p.id);
+      e.dataTransfer.effectAllowed = "move";
+      card.classList.add("dragging");
+    });
+    card.addEventListener("dragend", () => card.classList.remove("dragging"));
+  }
   if (p.pinned) card.append(el("div", { class: "pin-icon" }, "📌 Pinned"));
   // Resolve uploaded images: prefer the new array, fall back to legacy single fields
   const images = (Array.isArray(p.imageDataUrls) && p.imageDataUrls.length > 0)

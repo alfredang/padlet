@@ -324,6 +324,22 @@ a:hover { text-decoration: underline; }
   line-height: 1;
 }
 
+/* Drag states for sections + posts */
+.post.draggable { cursor: grab; }
+.post.dragging { opacity: 0.4; cursor: grabbing; }
+.section-posts.post-drop-target {
+  outline: 2px dashed var(--accent);
+  outline-offset: 4px;
+  background: rgba(124, 58, 237, 0.06);
+  border-radius: 10px;
+  min-height: 60px;
+}
+.section-header.dragging { opacity: 0.5; }
+.section-column.section-drop-target {
+  outline: 2px dashed var(--accent);
+  outline-offset: 4px;
+}
+
 /* Post card */
 .post {
   background: var(--surface);
