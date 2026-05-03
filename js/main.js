@@ -552,36 +552,42 @@ function renderBoard() {
   const trainer = isTrainer(state.user, state.room);
   const sortedPosts = filterAndSort(state.posts);
 
-  // Group posts by sectionId. Posts without a section go into "Uncategorized".
+  // Build section indices: top-level sections, sub-sections grouped by parent
   const validSectionIds = new Set(state.sections.map((s) => s.id));
-  const grouped = new Map();
-  for (const s of state.sections) grouped.set(s.id, []);
+  const topSections = state.sections.filter((s) => !s.parentSectionId);
+  const subsByParent = new Map();
+  for (const s of state.sections) {
+    if (s.parentSectionId && validSectionIds.has(s.parentSectionId)) {
+      if (!subsByParent.has(s.parentSectionId)) subsByParent.set(s.parentSectionId, []);
+      subsByParent.get(s.parentSectionId).push(s);
+    }
+  }
+
+  // Group posts by sectionId
+  const postsBySection = new Map();
+  for (const s of state.sections) postsBySection.set(s.id, []);
   const orphans = [];
   for (const p of sortedPosts) {
     if (p.sectionId && validSectionIds.has(p.sectionId)) {
-      grouped.get(p.sectionId).push(p);
+      postsBySection.get(p.sectionId).push(p);
     } else {
       orphans.push(p);
     }
   }
 
-  // Render configured sections in their order
-  for (const section of state.sections) {
-    board.append(buildSectionColumn(section, grouped.get(section.id) || [], trainer));
+  // Render top-level columns (which contain their sub-sections + own posts)
+  for (const top of topSections) {
+    board.append(buildSectionColumn(top, postsBySection, subsByParent, trainer));
   }
 
   // Show "Uncategorized" only when there are unassigned posts OR no sections at all
-  if (orphans.length > 0 || state.sections.length === 0) {
-    board.append(buildSectionColumn(
-      { id: null, title: state.sections.length === 0 ? "Posts" : "Uncategorized" },
-      orphans,
-      false,  // can't manage the orphans column
-    ));
+  if (orphans.length > 0 || topSections.length === 0) {
+    board.append(buildOrphanColumn(orphans, topSections.length === 0));
   }
 
   // Trainer "+ Add section" tile at the end
   if (trainer) {
-    const addBtn = el("button", { class: "section-add-btn", onclick: openAddSectionModal },
+    const addBtn = el("button", { class: "section-add-btn", onclick: () => openAddSectionModal(null) },
       el("div", { class: "section-add-icon" }, "+"),
       el("div", null, "Add a section"),
     );
@@ -589,19 +595,54 @@ function renderBoard() {
   }
 }
 
-function buildSectionColumn(section, posts, trainer) {
+function buildOrphanColumn(orphans, isOnlyColumn) {
+  const col = el("section", { class: "section-column" });
+  col.append(el("div", { class: "section-header" },
+    el("h3", { class: "section-title" }, isOnlyColumn ? "Posts" : "Uncategorized"),
+  ));
+  if (state.user) {
+    col.append(el("button", { class: "section-add-post", onclick: () => openComposer(null) },
+      "+ Add post"));
+  }
+  const postsWrap = el("div", { class: "section-posts" });
+  postsWrap.addEventListener("dragover", (e) => {
+    if (Array.from(e.dataTransfer.types).includes("application/x-post-id")) {
+      e.preventDefault();
+      postsWrap.classList.add("post-drop-target");
+    }
+  });
+  postsWrap.addEventListener("dragleave", () => postsWrap.classList.remove("post-drop-target"));
+  postsWrap.addEventListener("drop", async (e) => {
+    if (!Array.from(e.dataTransfer.types).includes("application/x-post-id")) return;
+    e.preventDefault();
+    postsWrap.classList.remove("post-drop-target");
+    const postId = e.dataTransfer.getData("application/x-post-id");
+    if (!postId) return;
+    try { await updatePost(postId, { sectionId: null }); toast("Moved", "success"); }
+    catch (err) { toast("Move failed — only the author can move posts", "error"); }
+  });
+  if (orphans.length === 0) {
+    postsWrap.append(el("div", { class: "section-empty" }, "No posts yet"));
+  } else {
+    for (const p of orphans) postsWrap.append(postCard(p));
+  }
+  col.append(postsWrap);
+  return col;
+}
+
+function buildSectionColumn(section, postsBySection, subsByParent, trainer) {
   const col = el("section", { class: "section-column" });
 
-  // Header with title + (trainer) actions
+  // Header with title + (trainer) actions + section reorder drag
   const header = el("div", { class: "section-header" },
     el("h3", { class: "section-title" }, section.title || "Untitled"),
   );
   if (trainer && section.id) {
     header.append(el("div", { class: "section-actions" },
+      el("button", { class: "btn-ghost", title: "Add sub-section", onclick: (e) => { e.stopPropagation(); openAddSectionModal(section.id); } }, "➕"),
       el("button", { class: "btn-ghost", title: "Rename", onclick: (e) => { e.stopPropagation(); openRenameSectionModal(section); } }, "✏️"),
       el("button", { class: "btn-ghost", title: "Delete", onclick: (e) => { e.stopPropagation(); confirmDeleteSection(section); } }, "🗑"),
     ));
-    // Section reordering — trainer drags a section by its header onto another
     header.draggable = true;
     header.style.cursor = "grab";
     header.addEventListener("dragstart", (e) => {
@@ -630,7 +671,6 @@ function buildSectionColumn(section, posts, trainer) {
       if (!draggedId || draggedId === section.id) return;
       const dragged = state.sections.find((s) => s.id === draggedId);
       if (!dragged) return;
-      // Swap orders so the dragged section takes this section's position
       try {
         await Promise.all([
           updateSection(draggedId, { order: section.order || 0 }),
@@ -642,13 +682,45 @@ function buildSectionColumn(section, posts, trainer) {
     });
   }
 
-  // "Add post here" button — opens composer with this section pre-selected
+  // "Add post here" button for this top-level section
   if (state.user) {
     col.append(el("button", { class: "section-add-post", onclick: () => openComposer(section.id) },
       "+ Add post"));
   }
 
-  // Posts in this section — drop target for moving posts between sections
+  // Posts directly under this section (not in a sub-section)
+  col.append(buildPostsDropZone(postsBySection.get(section.id) || [], section.id));
+
+  // Sub-sections inside this column
+  const subs = subsByParent.get(section.id) || [];
+  for (const sub of subs) {
+    col.append(buildSubSection(sub, postsBySection.get(sub.id) || [], trainer));
+  }
+
+  return col;
+}
+
+function buildSubSection(sub, posts, trainer) {
+  const wrap = el("div", { class: "sub-section" });
+  const header = el("div", { class: "sub-section-header" },
+    el("span", { class: "sub-section-title" }, "↳ " + (sub.title || "Untitled")),
+  );
+  if (trainer) {
+    header.append(el("div", { class: "sub-section-actions" },
+      el("button", { class: "btn-ghost", title: "Rename", onclick: (e) => { e.stopPropagation(); openRenameSectionModal(sub); } }, "✏️"),
+      el("button", { class: "btn-ghost", title: "Delete", onclick: (e) => { e.stopPropagation(); confirmDeleteSection(sub); } }, "🗑"),
+    ));
+  }
+  wrap.append(header);
+  if (state.user) {
+    wrap.append(el("button", { class: "section-add-post sub-add-post", onclick: () => openComposer(sub.id) },
+      "+ Add post"));
+  }
+  wrap.append(buildPostsDropZone(posts, sub.id));
+  return wrap;
+}
+
+function buildPostsDropZone(posts, sectionId) {
   const postsWrap = el("div", { class: "section-posts" });
   postsWrap.addEventListener("dragover", (e) => {
     if (Array.from(e.dataTransfer.types).includes("application/x-post-id")) {
@@ -665,36 +737,36 @@ function buildSectionColumn(section, posts, trainer) {
     if (!postId) return;
     const movedPost = state.posts.find((p) => p.id === postId);
     if (!movedPost) return;
-    if (movedPost.sectionId === section.id) return; // already here
+    if (movedPost.sectionId === sectionId) return;
     try {
-      await updatePost(postId, { sectionId: section.id || null });
+      await updatePost(postId, { sectionId: sectionId || null });
       toast("Moved", "success");
     } catch (err) {
       toast("Move failed — only the post's author can move it", "error");
     }
   });
   if (posts.length === 0) {
-    postsWrap.append(el("div", { class: "section-empty" }, "No posts yet"));
+    postsWrap.append(el("div", { class: "section-empty" }, "Drop posts here"));
   } else {
     for (const p of posts) postsWrap.append(postCard(p));
   }
-  col.append(postsWrap);
-
-  return col;
+  return postsWrap;
 }
 
-function openAddSectionModal() {
+function openAddSectionModal(parentSectionId) {
   if (!isTrainer(state.user, state.room)) return;
-  const input = el("input", { type: "text", placeholder: "Section name (e.g. Singapore)" });
+  const isSub = !!parentSectionId;
+  const parent = isSub ? state.sections.find((s) => s.id === parentSectionId) : null;
+  const input = el("input", { type: "text", placeholder: isSub ? "Sub-section name (e.g. Group A)" : "Section name (e.g. Singapore)" });
   const node = el("div", null,
-    el("h2", null, "Add a section"),
-    el("label", null, "Section name"), input,
+    el("h2", null, isSub ? `Add sub-section under "${parent ? parent.title : "section"}"` : "Add a section"),
+    el("label", null, isSub ? "Sub-section name" : "Section name"), input,
     el("div", { class: "modal-actions" },
       el("button", { class: "btn btn-secondary", onclick: closeModal }, "Cancel"),
       el("button", { class: "btn", onclick: async () => {
         const name = input.value.trim();
         if (!name) { toast("Section needs a name", "error"); return; }
-        try { await createSection(state.roomId, name); toast("Section added", "success"); closeModal(); }
+        try { await createSection(state.roomId, name, { parentSectionId: parentSectionId || null }); toast(isSub ? "Sub-section added" : "Section added", "success"); closeModal(); }
         catch (e) { toast("Failed: " + (e.message || e.code), "error"); }
       }}, "Add"),
     ),
@@ -726,12 +798,15 @@ function openRenameSectionModal(section) {
 
 function confirmDeleteSection(section) {
   if (!isTrainer(state.user, state.room)) return;
-  const postsInSection = state.posts.filter((p) => p.sectionId === section.id).length;
-  const msg = postsInSection > 0
-    ? `Delete section "${section.title}"? The ${postsInSection} post(s) inside will move to "Uncategorized" (they won't be deleted).`
-    : `Delete section "${section.title}"?`;
+  const subs = state.sections.filter((s) => s.parentSectionId === section.id);
+  const postsInThis = state.posts.filter((p) => p.sectionId === section.id).length;
+  const postsInSubs = state.posts.filter((p) => subs.some((s) => s.id === p.sectionId)).length;
+  let msg = `Delete section "${section.title}"?`;
+  if (subs.length > 0) msg += ` Its ${subs.length} sub-section(s) will also be deleted.`;
+  if (postsInThis + postsInSubs > 0) msg += ` ${postsInThis + postsInSubs} post(s) will move to "Uncategorized".`;
   if (!confirm(msg)) return;
-  deleteSection(section.id)
+  Promise.all(subs.map((s) => deleteSection(s.id)))
+    .then(() => deleteSection(section.id))
     .then(() => toast("Section deleted", "success"))
     .catch((e) => toast("Failed: " + (e.message || e.code), "error"));
 }
@@ -1259,13 +1334,25 @@ function openComposer(defaultSectionId) {
   const descInput = el("textarea", { placeholder: "What's your idea, reflection, or answer?" });
   const editor = buildMediaEditor();
 
-  // Section dropdown — only shown when sections exist
+  // Section dropdown — only shown when sections exist; sub-sections are indented
   let sectionSelect = null;
   if (state.sections.length > 0) {
-    sectionSelect = el("select", null,
-      el("option", { value: "" }, "Uncategorized"),
-      ...state.sections.map((s) => el("option", { value: s.id }, s.title || "Untitled")),
-    );
+    const tops = state.sections.filter((s) => !s.parentSectionId);
+    const childrenByParent = new Map();
+    for (const s of state.sections) {
+      if (s.parentSectionId) {
+        if (!childrenByParent.has(s.parentSectionId)) childrenByParent.set(s.parentSectionId, []);
+        childrenByParent.get(s.parentSectionId).push(s);
+      }
+    }
+    const opts = [el("option", { value: "" }, "Uncategorized")];
+    for (const top of tops) {
+      opts.push(el("option", { value: top.id }, top.title || "Untitled"));
+      for (const child of (childrenByParent.get(top.id) || [])) {
+        opts.push(el("option", { value: child.id }, "    ↳ " + (child.title || "Untitled")));
+      }
+    }
+    sectionSelect = el("select", null, ...opts);
     if (defaultSectionId) sectionSelect.value = defaultSectionId;
   }
 

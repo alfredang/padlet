@@ -139,14 +139,15 @@ export async function fetchMyRooms() {
 // Stored as type="section" docs in posts collection so they fit existing rules.
 // UI gates section creation/edit/delete to trainer (room creator).
 
-export async function createSection(roomId, title, order) {
+export async function createSection(roomId, title, opts = {}) {
   const user = auth.currentUser;
   if (!user) throw new Error("not signed in");
   await addDoc(collection(db, "posts"), {
     type: "section",
     roomId,
+    parentSectionId: opts.parentSectionId || null,
     title: (title || "Untitled").trim() || "Untitled",
-    order: typeof order === "number" ? order : Date.now(),
+    order: typeof opts.order === "number" ? opts.order : Date.now(),
     authorId: user.uid,
     pinned: false,
     createdAt: serverTimestamp(),

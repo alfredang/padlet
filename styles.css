@@ -340,6 +340,55 @@ a:hover { text-decoration: underline; }
   outline-offset: 4px;
 }
 
+/* Sub-sections (nested inside a parent section column) */
+.sub-section {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px;
+  margin-top: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.sub-section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  padding: 0 2px 4px;
+  border-bottom: 1px dashed var(--border);
+}
+.sub-section-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--muted);
+  letter-spacing: 0.02em;
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.sub-section-actions {
+  display: inline-flex;
+  gap: 2px;
+}
+.sub-section-actions .btn-ghost {
+  padding: 2px 5px;
+  font-size: 12px;
+}
+.sub-add-post {
+  font-size: 12px;
+  padding: 4px 8px;
+}
+.sub-section .section-posts { gap: 8px; }
+.sub-section .post {
+  /* slightly smaller to feel nested */
+  padding: 12px;
+}
+.sub-section .post .post-title { font-size: 14px; }
+.sub-section .post .post-body { font-size: 13px; }
+
 /* Post card */
 .post {
   background: var(--surface);
