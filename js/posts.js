@@ -20,7 +20,7 @@ export function subscribePosts(roomId, cb) {
     const items = [];
     snap.forEach((d) => {
       const data = d.data();
-      if (data.type === "room" || data.type === "pdf-page" || data.type === "membership") return;
+      if (data.type === "room" || data.type === "pdf-page" || data.type === "membership" || data.type === "section") return;
       items.push({ id: d.id, ...data });
     });
     cb(items);
@@ -47,7 +47,7 @@ export function subscribePdfPages(postId, cb) {
   });
 }
 
-export async function createPost(roomId, { title, description, category, linkUrl, imageDataUrls, linkPreview, pdfPages, authorName, onPdfProgress }) {
+export async function createPost(roomId, { title, description, category, sectionId, linkUrl, imageDataUrls, linkPreview, pdfPages, authorName, onPdfProgress }) {
   const user = auth.currentUser;
   if (!user) throw new Error("not signed in");
   const hasPdf = Array.isArray(pdfPages) && pdfPages.length > 0;
@@ -57,6 +57,7 @@ export async function createPost(roomId, { title, description, category, linkUrl
   const mainRef = await addDoc(POSTS, {
     type: "post",
     roomId,
+    sectionId: sectionId || null,
     title: title || "",
     description: description || "",
     category: category || "",

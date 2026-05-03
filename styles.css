@@ -209,16 +209,120 @@ a:hover { text-decoration: underline; }
 .toolbar input { flex: 1; min-width: 220px; max-width: 360px; }
 .toolbar input:focus, .toolbar select:focus { border-color: var(--accent); }
 
-/* Board (masonry) */
+/* Board (masonry — used when no sections are defined) */
 .board {
   padding: 24px 28px 96px;
+}
+.board:not(.board-sections) {
   column-count: 4;
   column-gap: 18px;
 }
-.board > * { break-inside: avoid; margin-bottom: 18px; }
-@media (max-width: 1200px) { .board { column-count: 3; } }
-@media (max-width: 840px) { .board { column-count: 2; padding: 18px; } }
-@media (max-width: 540px) { .board { column-count: 1; } }
+.board:not(.board-sections) > * { break-inside: avoid; margin-bottom: 18px; }
+@media (max-width: 1200px) { .board:not(.board-sections) { column-count: 3; } }
+@media (max-width: 840px) { .board:not(.board-sections) { column-count: 2; padding: 18px; } }
+@media (max-width: 540px) { .board:not(.board-sections) { column-count: 1; } }
+
+/* Board (column sections — Padlet-style) */
+.board-sections {
+  display: flex;
+  flex-direction: row;
+  align-items: flex-start;
+  gap: 18px;
+  padding: 24px 28px 96px;
+  overflow-x: auto;
+  overflow-y: visible;
+  column-count: unset !important;
+  -webkit-overflow-scrolling: touch;
+}
+.section-column {
+  flex: 0 0 320px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 14px;
+  max-height: calc(100vh - 220px);
+  overflow-y: auto;
+}
+.section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 4px 4px 8px;
+  border-bottom: 1px solid var(--border);
+}
+.section-title {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 700;
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.section-actions {
+  display: inline-flex;
+  gap: 2px;
+}
+.section-actions .btn-ghost { padding: 4px 6px; font-size: 13px; }
+.section-add-post {
+  background: transparent;
+  border: 1px dashed var(--border);
+  color: var(--muted);
+  padding: 6px 10px;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+.section-add-post:hover {
+  background: var(--surface);
+  color: var(--accent);
+  border-color: var(--accent);
+}
+.section-posts {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.section-empty {
+  font-size: 13px;
+  color: var(--muted);
+  text-align: center;
+  padding: 16px 0;
+}
+.section-add-btn {
+  flex: 0 0 240px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 24px;
+  background: transparent;
+  border: 2px dashed var(--border);
+  border-radius: 14px;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 600;
+  min-height: 120px;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+.section-add-btn:hover {
+  background: var(--surface-2);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.section-add-icon {
+  font-size: 28px;
+  line-height: 1;
+}
 
 /* Post card */
 .post {

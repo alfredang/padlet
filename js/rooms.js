@@ -1,5 +1,6 @@
 import {
-  collection, doc, setDoc, getDoc, getDocs, query, where, onSnapshot, serverTimestamp,
+  collection, doc, addDoc, setDoc, getDoc, getDocs, updateDoc, deleteDoc,
+  query, where, onSnapshot, serverTimestamp,
 } from "https://www.gstatic.com/firebasejs/12.12.1/firebase-firestore.js";
 import {
   updateProfile,
@@ -132,4 +133,46 @@ export async function fetchMyRooms() {
     }
   });
   return Array.from(rooms.values()).sort((a, b) => (a.title || "").localeCompare(b.title || ""));
+}
+
+// Sections — column groupings within a room (like real Padlet's columns).
+// Stored as type="section" docs in posts collection so they fit existing rules.
+// UI gates section creation/edit/delete to trainer (room creator).
+
+export async function createSection(roomId, title, order) {
+  const user = auth.currentUser;
+  if (!user) throw new Error("not signed in");
+  await addDoc(collection(db, "posts"), {
+    type: "section",
+    roomId,
+    title: (title || "Untitled").trim() || "Untitled",
+    order: typeof order === "number" ? order : Date.now(),
+    authorId: user.uid,
+    pinned: false,
+    createdAt: serverTimestamp(),
+  });
+}
+
+export async function updateSection(sectionId, patch) {
+  await updateDoc(doc(db, "posts", sectionId), patch);
+}
+
+export async function deleteSection(sectionId) {
+  await deleteDoc(doc(db, "posts", sectionId));
+}
+
+export function subscribeSections(roomId, cb) {
+  const q = query(collection(db, "posts"), where("roomId", "==", roomId));
+  return onSnapshot(q, (snap) => {
+    const items = [];
+    snap.forEach((d) => {
+      const data = d.data();
+      if (data.type === "section") items.push({ id: d.id, ...data });
+    });
+    items.sort((a, b) => (a.order || 0) - (b.order || 0));
+    cb(items);
+  }, (err) => {
+    console.error("sections subscribe error", err);
+    cb([], err);
+  });
 }

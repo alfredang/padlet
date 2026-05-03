@@ -4,6 +4,7 @@ import { subscribeComments, addComment, deleteComment } from "./comments.js";
 import {
   createRoom, joinRoom, subscribeRoom, updateRoomTitle, setAnnouncement, isTrainer,
   recordMembership, fetchMyRooms,
+  createSection, updateSection, deleteSection, subscribeSections,
 } from "./rooms.js";
 import { exportCSV } from "./admin.js";
 import { el, escapeHtml, showModal, closeModal, toast, formatRelativeTime, fileToDataUrl } from "./ui.js";
@@ -18,6 +19,8 @@ const state = {
   sort: "newest",
   unsubRoom: null,
   unsubPosts: null,
+  unsubSections: null,
+  sections: [],
   detailOpenFor: null,
   unsubDetailComments: null,
   unsubDetailPdfPages: null,
@@ -93,10 +96,12 @@ function wireOnlineStatus() {
 function teardownRoom() {
   if (state.unsubPosts) { state.unsubPosts(); state.unsubPosts = null; }
   if (state.unsubRoom) { state.unsubRoom(); state.unsubRoom = null; }
+  if (state.unsubSections) { state.unsubSections(); state.unsubSections = null; }
   if (state.unsubDetailComments) { state.unsubDetailComments(); state.unsubDetailComments = null; }
   if (state.unsubDetailPdfPages) { state.unsubDetailPdfPages(); state.unsubDetailPdfPages = null; }
   state.room = null;
   state.posts = [];
+  state.sections = [];
   state.detailOpenFor = null;
   closeModal();
 }
@@ -151,6 +156,10 @@ function enterRoom() {
       const fresh = state.posts.find((p) => p.id === state.detailOpenFor);
       if (fresh) refreshDetailModal(fresh);
     }
+  });
+  state.unsubSections = subscribeSections(state.roomId, (sections) => {
+    state.sections = sections;
+    renderBoard();
   });
 }
 
@@ -538,15 +547,132 @@ function tsMs(t) {
 function renderBoard() {
   const board = document.getElementById("board");
   board.innerHTML = "";
-  const items = filterAndSort(state.posts);
-  if (items.length === 0) {
-    board.append(el("div", { class: "empty-state", style: "column-span: all;" },
-      el("h2", null, state.posts.length === 0 ? "No posts yet" : "No matches"),
-      el("p", null, state.posts.length === 0 ? "Tap the + button to add the first post." : "Try a different search or filter."),
-    ));
-    return;
+  board.className = "board board-sections";
+
+  const trainer = isTrainer(state.user, state.room);
+  const sortedPosts = filterAndSort(state.posts);
+
+  // Group posts by sectionId. Posts without a section go into "Uncategorized".
+  const validSectionIds = new Set(state.sections.map((s) => s.id));
+  const grouped = new Map();
+  for (const s of state.sections) grouped.set(s.id, []);
+  const orphans = [];
+  for (const p of sortedPosts) {
+    if (p.sectionId && validSectionIds.has(p.sectionId)) {
+      grouped.get(p.sectionId).push(p);
+    } else {
+      orphans.push(p);
+    }
   }
-  for (const p of items) board.append(postCard(p));
+
+  // Render configured sections in their order
+  for (const section of state.sections) {
+    board.append(buildSectionColumn(section, grouped.get(section.id) || [], trainer));
+  }
+
+  // Show "Uncategorized" only when there are unassigned posts OR no sections at all
+  if (orphans.length > 0 || state.sections.length === 0) {
+    board.append(buildSectionColumn(
+      { id: null, title: state.sections.length === 0 ? "Posts" : "Uncategorized" },
+      orphans,
+      false,  // can't manage the orphans column
+    ));
+  }
+
+  // Trainer "+ Add section" tile at the end
+  if (trainer) {
+    const addBtn = el("button", { class: "section-add-btn", onclick: openAddSectionModal },
+      el("div", { class: "section-add-icon" }, "+"),
+      el("div", null, "Add a section"),
+    );
+    board.append(addBtn);
+  }
+}
+
+function buildSectionColumn(section, posts, trainer) {
+  const col = el("section", { class: "section-column" });
+
+  // Header with title + (trainer) actions
+  const header = el("div", { class: "section-header" },
+    el("h3", { class: "section-title" }, section.title || "Untitled"),
+  );
+  if (trainer && section.id) {
+    header.append(el("div", { class: "section-actions" },
+      el("button", { class: "btn-ghost", title: "Rename", onclick: (e) => { e.stopPropagation(); openRenameSectionModal(section); } }, "✏️"),
+      el("button", { class: "btn-ghost", title: "Delete", onclick: (e) => { e.stopPropagation(); confirmDeleteSection(section); } }, "🗑"),
+    ));
+  }
+  col.append(header);
+
+  // "Add post here" button — opens composer with this section pre-selected
+  if (state.user) {
+    col.append(el("button", { class: "section-add-post", onclick: () => openComposer(section.id) },
+      "+ Add post"));
+  }
+
+  // Posts in this section
+  const postsWrap = el("div", { class: "section-posts" });
+  if (posts.length === 0) {
+    postsWrap.append(el("div", { class: "section-empty" }, "No posts yet"));
+  } else {
+    for (const p of posts) postsWrap.append(postCard(p));
+  }
+  col.append(postsWrap);
+
+  return col;
+}
+
+function openAddSectionModal() {
+  if (!isTrainer(state.user, state.room)) return;
+  const input = el("input", { type: "text", placeholder: "Section name (e.g. Singapore)" });
+  const node = el("div", null,
+    el("h2", null, "Add a section"),
+    el("label", null, "Section name"), input,
+    el("div", { class: "modal-actions" },
+      el("button", { class: "btn btn-secondary", onclick: closeModal }, "Cancel"),
+      el("button", { class: "btn", onclick: async () => {
+        const name = input.value.trim();
+        if (!name) { toast("Section needs a name", "error"); return; }
+        try { await createSection(state.roomId, name); toast("Section added", "success"); closeModal(); }
+        catch (e) { toast("Failed: " + (e.message || e.code), "error"); }
+      }}, "Add"),
+    ),
+  );
+  showModal(node);
+  setTimeout(() => input.focus(), 50);
+}
+
+function openRenameSectionModal(section) {
+  if (!isTrainer(state.user, state.room)) return;
+  const input = el("input", { type: "text" });
+  input.value = section.title || "";
+  const node = el("div", null,
+    el("h2", null, "Rename section"),
+    el("label", null, "Section name"), input,
+    el("div", { class: "modal-actions" },
+      el("button", { class: "btn btn-secondary", onclick: closeModal }, "Cancel"),
+      el("button", { class: "btn", onclick: async () => {
+        const name = input.value.trim();
+        if (!name) { toast("Section needs a name", "error"); return; }
+        try { await updateSection(section.id, { title: name }); toast("Renamed", "success"); closeModal(); }
+        catch (e) { toast("Failed: " + (e.message || e.code), "error"); }
+      }}, "Save"),
+    ),
+  );
+  showModal(node);
+  setTimeout(() => { input.focus(); input.select(); }, 50);
+}
+
+function confirmDeleteSection(section) {
+  if (!isTrainer(state.user, state.room)) return;
+  const postsInSection = state.posts.filter((p) => p.sectionId === section.id).length;
+  const msg = postsInSection > 0
+    ? `Delete section "${section.title}"? The ${postsInSection} post(s) inside will move to "Uncategorized" (they won't be deleted).`
+    : `Delete section "${section.title}"?`;
+  if (!confirm(msg)) return;
+  deleteSection(section.id)
+    .then(() => toast("Section deleted", "success"))
+    .catch((e) => toast("Failed: " + (e.message || e.code), "error"));
 }
 
 function postCard(p) {
@@ -1056,11 +1182,21 @@ function buildMediaEditor(initial = {}) {
   };
 }
 
-function openComposer() {
+function openComposer(defaultSectionId) {
   if (!state.user) return;
   const titleInput = el("input", { type: "text", placeholder: "Title" });
   const descInput = el("textarea", { placeholder: "What's your idea, reflection, or answer?" });
   const editor = buildMediaEditor();
+
+  // Section dropdown — only shown when sections exist
+  let sectionSelect = null;
+  if (state.sections.length > 0) {
+    sectionSelect = el("select", null,
+      el("option", { value: "" }, "Uncategorized"),
+      ...state.sections.map((s) => el("option", { value: s.id }, s.title || "Untitled")),
+    );
+    if (defaultSectionId) sectionSelect.value = defaultSectionId;
+  }
 
   let submitting = false;
   const submitBtn = el("button", { class: "btn", onclick: async () => {
@@ -1076,6 +1212,7 @@ function openComposer() {
     try {
       await createPost(state.roomId, {
         title, description,
+        sectionId: sectionSelect ? sectionSelect.value : null,
         imageDataUrls: v.imageDataUrls,
         linkUrl: v.linkUrl,
         linkPreview: v.linkPreview,
@@ -1099,6 +1236,8 @@ function openComposer() {
     el("h2", null, "New post"),
     el("label", null, "Title"), titleInput,
     el("label", null, "Description"), descInput,
+    sectionSelect ? el("label", null, "Section") : null,
+    sectionSelect,
     ...editor.fields,
     el("div", { class: "modal-actions" },
       el("button", { class: "btn btn-secondary", onclick: closeModal }, "Cancel"),
