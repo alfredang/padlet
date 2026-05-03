@@ -757,7 +757,7 @@ function openAddSectionModal(parentSectionId) {
   if (!isTrainer(state.user, state.room)) return;
   const isSub = !!parentSectionId;
   const parent = isSub ? state.sections.find((s) => s.id === parentSectionId) : null;
-  const input = el("input", { type: "text", placeholder: isSub ? "Sub-section name (e.g. Group A)" : "Section name (e.g. Singapore)" });
+  const input = el("input", { type: "text", placeholder: isSub ? "Sub-section name" : "Section name" });
   const node = el("div", null,
     el("h2", null, isSub ? `Add sub-section under "${parent ? parent.title : "section"}"` : "Add a section"),
     el("label", null, isSub ? "Sub-section name" : "Section name"), input,
