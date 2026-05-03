@@ -1,16 +1,24 @@
 import {
   collection, doc, addDoc, deleteDoc,
-  query, where, orderBy, onSnapshot, serverTimestamp,
+  query, where, onSnapshot, serverTimestamp,
 } from "https://www.gstatic.com/firebasejs/12.12.1/firebase-firestore.js";
 import { db, auth } from "./firebase.js";
 
 const COMMENTS = collection(db, "comments");
 
+function tsMs(t) {
+  if (!t) return 0;
+  if (t.toMillis) return t.toMillis();
+  if (t.seconds) return t.seconds * 1000;
+  return 0;
+}
+
 export function subscribeComments(postId, cb) {
-  const q = query(COMMENTS, where("postId", "==", postId), orderBy("createdAt", "asc"));
+  const q = query(COMMENTS, where("postId", "==", postId));
   return onSnapshot(q, (snap) => {
     const items = [];
     snap.forEach((d) => items.push({ id: d.id, ...d.data() }));
+    items.sort((a, b) => tsMs(a.createdAt) - tsMs(b.createdAt));
     cb(items);
   }, (err) => {
     console.error("comments subscribe error", err);

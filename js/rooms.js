@@ -1,8 +1,22 @@
 import {
-  doc, setDoc, getDoc, onSnapshot, serverTimestamp,
+  collection, doc, setDoc, getDoc, getDocs, query, where, onSnapshot, serverTimestamp,
 } from "https://www.gstatic.com/firebasejs/12.12.1/firebase-firestore.js";
-import { db } from "./firebase.js";
+import {
+  updateProfile,
+} from "https://www.gstatic.com/firebasejs/12.12.1/firebase-auth.js";
+import { db, auth } from "./firebase.js";
 import { signInAnon } from "./auth.js";
+
+async function ensureSignedIn(nickname) {
+  if (auth.currentUser) {
+    const user = auth.currentUser;
+    if (nickname && nickname.trim() && user.isAnonymous && !user.displayName) {
+      await updateProfile(user, { displayName: nickname.trim() });
+    }
+    return user;
+  }
+  return signInAnon(nickname);
+}
 
 // Room metadata is stored as a doc in the existing `posts` collection with
 // type="room". This works under the current production Firestore rules
@@ -19,7 +33,8 @@ export function generateCode() {
 }
 
 export async function createRoom(nickname) {
-  const user = await signInAnon(nickname);
+  const user = await ensureSignedIn(nickname);
+  const displayName = (nickname && nickname.trim()) || user.displayName || "Trainer";
   for (let i = 0; i < 5; i++) {
     const code = generateCode();
     const ref = doc(db, "posts", code);
@@ -31,7 +46,7 @@ export async function createRoom(nickname) {
       title: "",
       announcement: "",
       authorId: user.uid,
-      authorName: (nickname || "Trainer").trim() || "Trainer",
+      authorName: displayName,
       pinned: false,
       createdAt: serverTimestamp(),
     });
@@ -43,7 +58,7 @@ export async function createRoom(nickname) {
 export async function joinRoom(code, nickname) {
   const clean = (code || "").toUpperCase().trim();
   if (!clean) throw new Error("Please enter a room code");
-  await signInAnon(nickname);
+  await ensureSignedIn(nickname);
   const snap = await getDoc(doc(db, "posts", clean));
   if (!snap.exists() || snap.data().type !== "room") throw new Error("Room not found");
   return clean;
@@ -72,4 +87,49 @@ export async function setAnnouncement(roomId, text) {
 
 export function isTrainer(user, room) {
   return !!(room && user && room.authorId === user.uid);
+}
+
+// Membership records let signed-in users see the rooms they've joined across
+// any device (as long as they sign in with the same account). Stored as a
+// type="membership" doc in the posts collection so it works under existing
+// Firestore rules (signedIn + authorId match + pinned false).
+export async function recordMembership(roomId, room) {
+  const user = auth.currentUser;
+  if (!user || !roomId) return;
+  const docId = `mem_${user.uid}_${roomId}`;
+  const ref = doc(db, "posts", docId);
+  try {
+    await setDoc(ref, {
+      type: "membership",
+      roomId,
+      roomTitle: (room && room.title) || "",
+      authorId: user.uid,
+      authorName: user.displayName || "Guest",
+      pinned: false,
+      lastJoinedAt: serverTimestamp(),
+    }, { merge: true });
+  } catch (e) {
+    console.warn("membership record failed", e);
+  }
+}
+
+// Returns rooms the current user has been in: rooms they created (type=room)
+// + rooms they joined (type=membership). Deduplicated by room code.
+export async function fetchMyRooms() {
+  const user = auth.currentUser;
+  if (!user) return [];
+  const q = query(collection(db, "posts"), where("authorId", "==", user.uid));
+  const snap = await getDocs(q);
+  const rooms = new Map();
+  snap.forEach((d) => {
+    const data = d.data();
+    if (data.type === "room") {
+      rooms.set(data.roomId, { code: data.roomId, title: data.title || "", role: "trainer" });
+    } else if (data.type === "membership") {
+      if (!rooms.has(data.roomId)) {
+        rooms.set(data.roomId, { code: data.roomId, title: data.roomTitle || "", role: "member" });
+      }
+    }
+  });
+  return Array.from(rooms.values()).sort((a, b) => (a.title || "").localeCompare(b.title || ""));
 }

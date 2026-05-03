@@ -1,11 +1,12 @@
-import { onAuthChange, signInAnon, signOutUser, displayNameOf } from "./auth.js";
-import { subscribePosts, createPost, updatePost, deletePost, toggleLike, setPinned } from "./posts.js";
+import { onAuthChange, signInAnon, signInGoogle, signOutUser, displayNameOf } from "./auth.js";
+import { subscribePosts, subscribePdfPages, createPost, updatePost, deletePost, toggleLike, setPinned } from "./posts.js";
 import { subscribeComments, addComment, deleteComment } from "./comments.js";
 import {
   createRoom, joinRoom, subscribeRoom, updateRoomTitle, setAnnouncement, isTrainer,
+  recordMembership, fetchMyRooms,
 } from "./rooms.js";
 import { exportCSV } from "./admin.js";
-import { el, escapeHtml, showModal, closeModal, toast, formatRelativeTime } from "./ui.js";
+import { el, escapeHtml, showModal, closeModal, toast, formatRelativeTime, fileToDataUrl } from "./ui.js";
 
 const state = {
   user: null,
@@ -19,6 +20,7 @@ const state = {
   unsubPosts: null,
   detailOpenFor: null,
   unsubDetailComments: null,
+  unsubDetailPdfPages: null,
 };
 
 boot();
@@ -37,6 +39,24 @@ function boot() {
 function applyTheme() {
   const t = localStorage.getItem("theme") || "light";
   document.documentElement.classList.toggle("dark", t === "dark");
+}
+
+const RECENT_KEY = "padlet-recent-rooms";
+const MAX_RECENT = 10;
+
+function getRecentRooms() {
+  try { return JSON.parse(localStorage.getItem(RECENT_KEY)) || []; }
+  catch { return []; }
+}
+function saveRecentRoom(code, title) {
+  if (!code) return;
+  const list = getRecentRooms().filter((r) => r.code !== code);
+  list.unshift({ code, title: title || "", lastVisited: Date.now() });
+  localStorage.setItem(RECENT_KEY, JSON.stringify(list.slice(0, MAX_RECENT)));
+}
+function removeRecentRoom(code) {
+  const list = getRecentRooms().filter((r) => r.code !== code);
+  localStorage.setItem(RECENT_KEY, JSON.stringify(list));
 }
 function toggleTheme() {
   const next = document.documentElement.classList.contains("dark") ? "light" : "dark";
@@ -74,6 +94,7 @@ function teardownRoom() {
   if (state.unsubPosts) { state.unsubPosts(); state.unsubPosts = null; }
   if (state.unsubRoom) { state.unsubRoom(); state.unsubRoom = null; }
   if (state.unsubDetailComments) { state.unsubDetailComments(); state.unsubDetailComments = null; }
+  if (state.unsubDetailPdfPages) { state.unsubDetailPdfPages(); state.unsubDetailPdfPages = null; }
   state.room = null;
   state.posts = [];
   state.detailOpenFor = null;
@@ -116,6 +137,8 @@ function enterRoom() {
       return;
     }
     state.room = room;
+    saveRecentRoom(state.roomId, room.title || "");
+    recordMembership(state.roomId, room).catch(() => {});
     renderHeaderForRoom();
     renderAnnouncement(room.announcement);
     renderUserArea();
@@ -163,7 +186,139 @@ function renderLanding() {
   const board = document.getElementById("board");
   board.innerHTML = "";
 
+  // Sign-in panel at the top
+  const signedIn = !!state.user;
+  const signedInWithGoogle = signedIn && !state.user.isAnonymous;
+  const signInPanel = el("div", { class: "landing-signin" });
+  if (signedInWithGoogle) {
+    signInPanel.append(
+      el("div", { class: "landing-signin-info" },
+        el("strong", null, "Signed in as " + displayNameOf(state.user)),
+        el("div", { class: "landing-signin-hint" }, "Your trainer status will persist across devices and sessions."),
+      ),
+      el("button", { class: "btn btn-secondary", onclick: async () => {
+        await signOutUser();
+        toast("Signed out", "info");
+      }}, "Sign out"),
+    );
+  } else if (signedIn) {
+    // Anonymous
+    signInPanel.append(
+      el("div", { class: "landing-signin-info" },
+        el("strong", null, "Continuing as " + displayNameOf(state.user)),
+        el("div", { class: "landing-signin-hint" }, "You're signed in as a guest. For trainer access that persists across devices, sign in with Google."),
+      ),
+      el("button", { class: "btn", onclick: async () => {
+        try { await signInGoogle(); toast("Signed in with Google", "success"); }
+        catch (e) { toast("Google sign-in failed: " + (e.message || e.code), "error"); }
+      }}, "🔑 Sign in with Google"),
+    );
+  } else {
+    signInPanel.append(
+      el("div", { class: "landing-signin-info" },
+        el("strong", null, "Trainer? Sign in with Google."),
+        el("div", { class: "landing-signin-hint" }, "Recommended if you'll be the trainer of a classroom — your trainer access stays with you across devices and browser refreshes. Students can still join as guest below."),
+      ),
+      el("button", { class: "btn", onclick: async () => {
+        try { await signInGoogle(); toast("Signed in with Google", "success"); }
+        catch (e) { toast("Google sign-in failed: " + (e.message || e.code), "error"); }
+      }}, "🔑 Sign in with Google"),
+    );
+  }
+  board.append(signInPanel);
+
+  // Signed-in users get a Firestore-backed "All your classrooms (any device)" list,
+  // populated asynchronously below.
+  if (signedIn) {
+    const myRoomsCard = el("div", { class: "landing-recent" },
+      el("h2", null, "All your classrooms"),
+      el("div", { class: "recent-list", id: "my-rooms-list" },
+        el("div", { class: "recent-row" },
+          el("div", { class: "recent-info" },
+            el("div", { class: "recent-title" }, "Loading…"),
+          ),
+        ),
+      ),
+    );
+    board.append(myRoomsCard);
+    fetchMyRooms().then((rooms) => {
+      const list = document.getElementById("my-rooms-list");
+      if (!list) return;
+      list.innerHTML = "";
+      if (rooms.length === 0) {
+        list.append(el("div", { class: "recent-row" },
+          el("div", { class: "recent-info" },
+            el("div", { class: "recent-title" }, "No classrooms yet"),
+            el("div", { class: "recent-code" }, "Create one below or join with a code"),
+          ),
+        ));
+        return;
+      }
+      for (const r of rooms) {
+        const row = el("div", { class: "recent-row" },
+          el("div", { class: "recent-info" },
+            el("div", { class: "recent-title" }, r.title || "Untitled Classroom"),
+            el("div", { class: "recent-code" }, r.code + (r.role === "trainer" ? " · trainer" : "")),
+          ),
+          el("button", { class: "btn", onclick: () => {
+            state.roomId = r.code;
+            setRoomInURL(r.code);
+            renderUserArea();
+            enterRoom();
+          }}, "Open"),
+        );
+        list.append(row);
+      }
+    }).catch((e) => {
+      const list = document.getElementById("my-rooms-list");
+      if (list) {
+        list.innerHTML = "";
+        list.append(el("div", { class: "recent-row" },
+          el("div", { class: "recent-info" },
+            el("div", { class: "recent-title" }, "Could not load your classrooms"),
+            el("div", { class: "recent-code" }, e.message || ""),
+          ),
+        ));
+      }
+    });
+  }
+
+  const recent = getRecentRooms();
+  if (recent.length > 0 && !signedIn) {
+    const recentList = el("div", { class: "recent-list" });
+    for (const r of recent) {
+      const row = el("div", { class: "recent-row" },
+        el("div", { class: "recent-info" },
+          el("div", { class: "recent-title" }, r.title || "Untitled Classroom"),
+          el("div", { class: "recent-code" }, r.code),
+        ),
+        el("button", { class: "btn", onclick: () => {
+          state.roomId = r.code;
+          setRoomInURL(r.code);
+          if (state.user) {
+            renderUserArea();
+            enterRoom();
+          } else {
+            showJoinPrompt(r.code);
+          }
+        }}, "Open"),
+        el("button", { class: "btn-ghost recent-remove", title: "Remove from list", onclick: (e) => {
+          e.stopPropagation();
+          removeRecentRoom(r.code);
+          renderLanding();
+        }}, "×"),
+      );
+      recentList.append(row);
+    }
+    const recentCard = el("div", { class: "landing-recent" },
+      el("h2", null, "Your recent classrooms"),
+      recentList,
+    );
+    board.append(recentCard);
+  }
+
   const createNick = el("input", { type: "text", placeholder: "Your name (e.g. Trainer Alex)" });
+  if (signedIn) createNick.value = displayNameOf(state.user);
   const createBtn = el("button", { class: "btn", onclick: async () => {
     if (createBtn.disabled) return;
     createBtn.disabled = true;
@@ -172,6 +327,7 @@ function renderLanding() {
       const code = await createRoom(createNick.value);
       state.roomId = code;
       setRoomInURL(code);
+      saveRecentRoom(code, "");
       toast("Classroom created", "success");
       renderUserArea();
       enterRoom();
@@ -183,6 +339,7 @@ function renderLanding() {
   }}, "Create classroom");
 
   const joinNick = el("input", { type: "text", placeholder: "Your name" });
+  if (signedIn) joinNick.value = displayNameOf(state.user);
   const joinCode = el("input", { type: "text", placeholder: "Classroom code (e.g. ABC123)", maxlength: 6, style: "text-transform: uppercase;" });
   joinCode.addEventListener("input", () => { joinCode.value = joinCode.value.toUpperCase(); });
   const joinBtn = el("button", { class: "btn", onclick: async () => {
@@ -193,6 +350,7 @@ function renderLanding() {
       const code = await joinRoom(joinCode.value, joinNick.value);
       state.roomId = code;
       setRoomInURL(code);
+      saveRecentRoom(code, "");
       toast("Joined " + code, "success");
       renderUserArea();
       enterRoom();
@@ -395,12 +553,26 @@ function postCard(p) {
   const liked = !!state.user && (p.likes || []).includes(state.user.uid);
   const card = el("div", { class: "post" + (p.pinned ? " pinned" : ""), onclick: () => openDetail(p) });
   if (p.pinned) card.append(el("div", { class: "pin-icon" }, "📌 Pinned"));
+  // Resolve uploaded images: prefer the new array, fall back to legacy single fields
+  const images = (Array.isArray(p.imageDataUrls) && p.imageDataUrls.length > 0)
+    ? p.imageDataUrls
+    : (p.imageDataUrl && typeof p.imageDataUrl === "string" && p.imageDataUrl.startsWith("data:") ? [p.imageDataUrl]
+       : (p.linkUrl && typeof p.linkUrl === "string" && p.linkUrl.startsWith("data:") ? [p.linkUrl] : []));
+  for (const url of images) {
+    const img = document.createElement("img");
+    img.src = url;
+    img.className = "post-image";
+    img.loading = "lazy";
+    img.onclick = (e) => e.stopPropagation();
+    card.append(img);
+  }
+  // Typed link / YouTube / preview (separate from the upload)
+  if (p.linkUrl && !p.linkUrl.startsWith("data:")) {
+    const media = renderMediaOrLink(p.linkUrl, false, p.linkPreview);
+    if (media) card.append(media);
+  }
   if (p.title) card.append(el("h3", { class: "post-title" }, p.title));
   if (p.description) card.append(el("p", { class: "post-body" }, truncate(p.description, 500)));
-  if (p.linkUrl) {
-    const a = el("a", { class: "post-link", href: p.linkUrl, target: "_blank", rel: "noopener", onclick: (e) => e.stopPropagation() }, "🔗 " + shortUrl(p.linkUrl));
-    card.append(a);
-  }
   const meta = el("div", { class: "post-meta" },
     el("span", { class: "author-row" }, "👤 " + (p.authorName || "Anon"), " · ", formatRelativeTime(p.createdAt)),
     el("button", {
@@ -420,19 +592,229 @@ function shortUrl(u) {
   try { return new URL(u).hostname.replace(/^www\./, ""); } catch { return u; }
 }
 
+function youtubeVideoId(u) {
+  try {
+    const url = new URL(u);
+    const host = url.hostname.replace(/^www\./, "");
+    if (host === "youtu.be") return url.pathname.slice(1).split("/")[0] || null;
+    if (host === "youtube.com" || host === "m.youtube.com" || host === "music.youtube.com") {
+      const v = url.searchParams.get("v");
+      if (v) return v;
+      const m = url.pathname.match(/^\/(embed|shorts|live|v)\/([^/?#]+)/);
+      if (m) return m[2];
+    }
+    return null;
+  } catch { return null; }
+}
+
+function youtubeEmbedUrl(u) {
+  const id = youtubeVideoId(u);
+  return id ? "https://www.youtube.com/embed/" + id : null;
+}
+
+function youtubeThumbUrl(id) {
+  return "https://i.ytimg.com/vi/" + id + "/hqdefault.jpg";
+}
+
+function isImageUrl(u) {
+  if (typeof u === "string" && u.startsWith("data:image/")) return true;
+  try {
+    const path = new URL(u).pathname.toLowerCase();
+    return /\.(jpg|jpeg|png|gif|webp|svg|avif)$/.test(path);
+  } catch { return false; }
+}
+
+async function compressImage(file, maxSize = 800, quality = 0.72) {
+  const dataUrl = await fileToDataUrl(file);
+  const img = new Image();
+  await new Promise((res, rej) => { img.onload = res; img.onerror = rej; img.src = dataUrl; });
+  const ratio = Math.min(1, maxSize / Math.max(img.width, img.height));
+  const w = Math.round(img.width * ratio);
+  const h = Math.round(img.height * ratio);
+  const canvas = document.createElement("canvas");
+  canvas.width = w; canvas.height = h;
+  canvas.getContext("2d").drawImage(img, 0, 0, w, h);
+  return canvas.toDataURL("image/jpeg", quality);
+}
+
+// PDF.js — lazy-loaded the first time a PDF is picked.
+let _pdfjsPromise = null;
+function loadPdfJs() {
+  if (_pdfjsPromise) return _pdfjsPromise;
+  _pdfjsPromise = import("https://cdn.jsdelivr.net/npm/pdfjs-dist@4.5.136/build/pdf.min.mjs").then((mod) => {
+    mod.GlobalWorkerOptions.workerSrc = "https://cdn.jsdelivr.net/npm/pdfjs-dist@4.5.136/build/pdf.worker.min.mjs";
+    return mod;
+  });
+  return _pdfjsPromise;
+}
+
+async function renderPdfPageImage(pdf, pageNum, maxWidth, quality) {
+  const page = await pdf.getPage(pageNum);
+  const baseViewport = page.getViewport({ scale: 1 });
+  const scale = Math.min(maxWidth / baseViewport.width, 2);
+  const viewport = page.getViewport({ scale });
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.round(viewport.width);
+  canvas.height = Math.round(viewport.height);
+  await page.render({ canvasContext: canvas.getContext("2d"), viewport }).promise;
+  return canvas.toDataURL("image/jpeg", quality);
+}
+
+async function pdfFirstPageImage(file, maxWidth = 800) {
+  const pdfjs = await loadPdfJs();
+  const arrayBuffer = await file.arrayBuffer();
+  const pdf = await pdfjs.getDocument({ data: arrayBuffer }).promise;
+  return renderPdfPageImage(pdf, 1, maxWidth, 0.78);
+}
+
+// Render every page of the PDF as an image. Each page is stored as its own
+// Firestore doc, so we don't have a per-doc size budget — only a hard page cap.
+async function pdfAllPagesImages(file, opts = {}) {
+  const maxPages = opts.maxPages ?? 80;
+  const maxWidth = opts.maxWidth ?? 800;
+  const quality = opts.quality ?? 0.7;
+  const onProgress = opts.onProgress;
+  const pdfjs = await loadPdfJs();
+  const arrayBuffer = await file.arrayBuffer();
+  const pdf = await pdfjs.getDocument({ data: arrayBuffer }).promise;
+  const totalPages = pdf.numPages;
+  const target = Math.min(totalPages, maxPages);
+  const pages = [];
+  for (let i = 1; i <= target; i++) {
+    pages.push(await renderPdfPageImage(pdf, i, maxWidth, quality));
+    if (onProgress) onProgress(i, target);
+  }
+  return { pages, totalPages, rendered: pages.length };
+}
+
+// Link previews via corsproxy.io (free, no key). Parses OpenGraph tags from
+// the fetched HTML. Cached in localStorage so repeated views don't re-fetch.
+const PREVIEW_CACHE_KEY = "padlet-link-previews";
+function getPreviewCache() {
+  try { return JSON.parse(localStorage.getItem(PREVIEW_CACHE_KEY)) || {}; }
+  catch { return {}; }
+}
+function setPreviewCache(cache) {
+  try { localStorage.setItem(PREVIEW_CACHE_KEY, JSON.stringify(cache)); } catch {}
+}
+
+async function fetchLinkPreview(url) {
+  const cache = getPreviewCache();
+  if (cache[url]) return cache[url];
+  const proxyUrl = "https://corsproxy.io/?" + encodeURIComponent(url);
+  const res = await fetch(proxyUrl);
+  if (!res.ok) throw new Error("preview fetch failed");
+  const html = await res.text();
+  const doc = new DOMParser().parseFromString(html, "text/html");
+  const meta = (sel) => doc.querySelector(sel)?.getAttribute("content") || "";
+  const preview = {
+    title:
+      meta("meta[property='og:title']") ||
+      meta("meta[name='twitter:title']") ||
+      doc.querySelector("title")?.textContent?.trim() ||
+      "",
+    description:
+      meta("meta[property='og:description']") ||
+      meta("meta[name='twitter:description']") ||
+      meta("meta[name='description']") ||
+      "",
+    image:
+      meta("meta[property='og:image']") ||
+      meta("meta[name='twitter:image']") ||
+      "",
+  };
+  if (preview.image && !/^https?:/i.test(preview.image)) {
+    try { preview.image = new URL(preview.image, url).href; } catch {}
+  }
+  cache[url] = preview;
+  setPreviewCache(cache);
+  return preview;
+}
+
+function renderMediaOrLink(url, isDetail, preview) {
+  if (!url) return null;
+  const ytId = youtubeVideoId(url);
+  if (ytId) {
+    if (isDetail) {
+      // Embedded player in detail view
+      const wrap = el("div", { class: "media-embed", onclick: (e) => e.stopPropagation() });
+      const iframe = document.createElement("iframe");
+      iframe.src = "https://www.youtube.com/embed/" + ytId;
+      iframe.title = "YouTube video";
+      iframe.loading = "lazy";
+      iframe.allowFullscreen = true;
+      iframe.setAttribute("allow", "accelerometer; clipboard-write; encrypted-media; gyroscope; picture-in-picture");
+      wrap.append(iframe);
+      return wrap;
+    }
+    // Thumbnail with play overlay on the card (lighter, loads instantly)
+    const thumb = el("div", { class: "yt-thumb" });
+    const img = document.createElement("img");
+    img.src = youtubeThumbUrl(ytId);
+    img.alt = "YouTube video";
+    img.loading = "lazy";
+    img.onerror = () => { img.src = "https://i.ytimg.com/vi/" + ytId + "/0.jpg"; };
+    thumb.append(img);
+    thumb.append(el("div", { class: "yt-play" }, "▶"));
+    return thumb;
+  }
+  if (isImageUrl(url)) {
+    const img = document.createElement("img");
+    img.src = url;
+    img.className = isDetail ? "detail-image" : "post-image";
+    img.loading = "lazy";
+    img.onclick = (e) => e.stopPropagation();
+    return img;
+  }
+  if (preview && (preview.image || preview.title)) {
+    return buildLinkPreviewCard(url, preview);
+  }
+  return el("a", {
+    class: "post-link",
+    href: url,
+    target: "_blank",
+    rel: "noopener",
+    onclick: (e) => e.stopPropagation(),
+  }, "🔗 " + shortUrl(url));
+}
+
 function openDetail(p) {
   state.detailOpenFor = p.id;
   showModal(buildDetailNode(p), { wide: true });
   if (state.unsubDetailComments) state.unsubDetailComments();
   state.unsubDetailComments = subscribeComments(p.id, (comments) => renderCommentThread(p, comments));
+  if (state.unsubDetailPdfPages) { state.unsubDetailPdfPages(); state.unsubDetailPdfPages = null; }
+  if (p.pdfPageCount && p.pdfPageCount > 0) {
+    state.unsubDetailPdfPages = subscribePdfPages(p.id, (pages) => renderPdfStack(pages));
+  }
   const observer = new MutationObserver(() => {
     if (!document.getElementById("modal-root").firstChild) {
       if (state.unsubDetailComments) { state.unsubDetailComments(); state.unsubDetailComments = null; }
+      if (state.unsubDetailPdfPages) { state.unsubDetailPdfPages(); state.unsubDetailPdfPages = null; }
       state.detailOpenFor = null;
       observer.disconnect();
     }
   });
   observer.observe(document.getElementById("modal-root"), { childList: true });
+}
+
+function renderPdfStack(pages) {
+  const stack = document.getElementById("pdf-stack");
+  if (!stack) return;
+  stack.innerHTML = "";
+  if (pages.length === 0) {
+    stack.append(el("div", { class: "pdf-note" }, "Loading pages…"));
+    return;
+  }
+  for (const page of pages) {
+    const img = document.createElement("img");
+    img.src = page.imageDataUrl;
+    img.className = "pdf-page";
+    img.alt = "Page " + page.pageNum;
+    img.loading = "lazy";
+    stack.append(img);
+    stack.append(el("div", { class: "pdf-page-label" }, "Page " + page.pageNum));
+  }
 }
 
 function refreshDetailModal(p) {
@@ -457,11 +839,41 @@ function buildDetailNode(p) {
     " · " + formatRelativeTime(p.createdAt),
     p.updatedAt && tsMs(p.updatedAt) - tsMs(p.createdAt) > 5000 ? " · edited" : "",
   ));
-  if (p.description) node.append(el("p", { class: "detail-body" }, p.description));
-  if (p.linkUrl) {
-    const a = el("a", { class: "detail-link", href: p.linkUrl, target: "_blank", rel: "noopener" }, "🔗 " + p.linkUrl);
-    node.append(a);
+  if (p.pdfPageCount && p.pdfPageCount > 0) {
+    node.append(el("div", { class: "pdf-pages", id: "pdf-stack" },
+      el("div", { class: "pdf-note" }, `Loading ${p.pdfPageCount} pages…`),
+    ));
+  } else if (p.pdfPages && p.pdfPages.length > 0) {
+    // Backwards compat for posts created before pdf pages moved to subdocs.
+    const pdfWrap = el("div", { class: "pdf-pages" });
+    p.pdfPages.forEach((pageUrl, i) => {
+      const img = document.createElement("img");
+      img.src = pageUrl;
+      img.className = "pdf-page";
+      img.alt = "Page " + (i + 1);
+      img.loading = i === 0 ? "eager" : "lazy";
+      pdfWrap.append(img);
+      pdfWrap.append(el("div", { class: "pdf-page-label" }, "Page " + (i + 1)));
+    });
+    node.append(pdfWrap);
+  } else {
+    // Uploaded image(s) — supports multiple via imageDataUrls array; falls back to legacy fields
+    const images = (Array.isArray(p.imageDataUrls) && p.imageDataUrls.length > 0)
+      ? p.imageDataUrls
+      : (p.imageDataUrl && typeof p.imageDataUrl === "string" && p.imageDataUrl.startsWith("data:") ? [p.imageDataUrl]
+         : (p.linkUrl && typeof p.linkUrl === "string" && p.linkUrl.startsWith("data:") ? [p.linkUrl] : []));
+    for (const url of images) {
+      const img = document.createElement("img");
+      img.src = url;
+      img.className = "detail-image";
+      node.append(img);
+    }
+    if (p.linkUrl && !p.linkUrl.startsWith("data:")) {
+      const media = renderMediaOrLink(p.linkUrl, true, p.linkPreview);
+      if (media) node.append(media);
+    }
   }
+  if (p.description) node.append(el("p", { class: "detail-body" }, p.description));
 
   const actions = el("div", { class: "detail-actions" });
   actions.append(el("button", {
@@ -520,25 +932,158 @@ function confirmDelete(p) {
   deletePost(p).then(() => { toast("Post deleted", "success"); closeModal(); }).catch((e) => toast("Failed: " + (e.message || e.code), "error"));
 }
 
+function buildMediaEditor(initial = {}) {
+  const state = {
+    images: Array.isArray(initial.images) ? [...initial.images] : [],
+    pdfPages: null,
+    linkPreview: initial.linkPreview || null,
+  };
+
+  const imageInput = el("input", { type: "file", accept: "image/*", multiple: true });
+  const imageList = el("div", { class: "image-list" });
+  const pdfInput = el("input", { type: "file", accept: "application/pdf" });
+  const pdfStatus = el("div", { class: "pdf-status" });
+  const linkInput = el("input", { type: "url", placeholder: "Paste a link or YouTube URL (optional)" });
+  if (initial.linkUrl) linkInput.value = initial.linkUrl;
+  const linkPreviewWrap = el("div", { class: "link-preview-wrap" });
+  if (initial.linkPreview && initial.linkUrl) {
+    linkPreviewWrap.append(buildLinkPreviewCard(initial.linkUrl, initial.linkPreview));
+  }
+
+  function renderImages() {
+    imageList.innerHTML = "";
+    state.images.forEach((url, i) => {
+      const item = el("div", { class: "image-item" });
+      const img = document.createElement("img");
+      img.src = url;
+      const remove = el("button", { type: "button", class: "image-item-remove", title: "Remove", onclick: () => {
+        state.images.splice(i, 1);
+        renderImages();
+      }}, "×");
+      item.append(img, remove);
+      imageList.append(item);
+    });
+  }
+  renderImages();
+
+  imageInput.addEventListener("change", async () => {
+    const files = Array.from(imageInput.files || []);
+    for (const f of files) {
+      if (f.size > 5 * 1024 * 1024) { toast(f.name + " too large (max 5MB)", "error"); continue; }
+      try {
+        const dataUrl = await compressImage(f);
+        state.images.push(dataUrl);
+        renderImages();
+      } catch { toast("Could not load " + f.name, "error"); }
+    }
+    imageInput.value = "";
+  });
+
+  pdfInput.addEventListener("change", async () => {
+    const f = pdfInput.files?.[0];
+    state.pdfPages = null;
+    pdfStatus.innerHTML = "";
+    if (!f) return;
+    if (f.size > 10 * 1024 * 1024) { toast("PDF too large (max 10MB)", "error"); pdfInput.value = ""; return; }
+    pdfStatus.textContent = "Rendering PDF…";
+    try {
+      const result = await pdfAllPagesImages(f, {
+        onProgress: (i, total) => { pdfStatus.textContent = `Rendering page ${i} of ${total}…`; },
+      });
+      if (result.pages.length === 0) throw new Error("no pages");
+      state.pdfPages = result.pages;
+      pdfStatus.innerHTML = "";
+      const thumb = document.createElement("img");
+      thumb.src = result.pages[0];
+      thumb.className = "pdf-thumb";
+      pdfStatus.append(thumb);
+      const note = result.rendered < result.totalPages
+        ? `Showing ${result.rendered} of ${result.totalPages} pages — capped at ${result.rendered}.`
+        : `${result.totalPages} pages ready to upload.`;
+      pdfStatus.append(el("div", { class: "pdf-note" }, note,
+        " ",
+        el("button", { type: "button", class: "btn-ghost", onclick: () => {
+          state.pdfPages = null;
+          pdfInput.value = "";
+          pdfStatus.innerHTML = "";
+        }}, "Remove"),
+      ));
+    } catch (e) {
+      console.error(e);
+      toast("Could not render PDF", "error");
+      pdfStatus.innerHTML = "";
+      pdfInput.value = "";
+    }
+  });
+
+  linkInput.addEventListener("blur", async () => {
+    const url = linkInput.value.trim();
+    state.linkPreview = null;
+    linkPreviewWrap.innerHTML = "";
+    if (!url || isImageUrl(url) || youtubeEmbedUrl(url)) return;
+    linkPreviewWrap.textContent = "Fetching preview…";
+    try {
+      const p = await fetchLinkPreview(url);
+      if (!p.title && !p.image) { linkPreviewWrap.innerHTML = ""; return; }
+      state.linkPreview = p;
+      linkPreviewWrap.innerHTML = "";
+      linkPreviewWrap.append(buildLinkPreviewCard(url, p));
+    } catch {
+      linkPreviewWrap.innerHTML = "";
+    }
+  });
+
+  const fields = [
+    el("label", null, "Add image(s) — pick multiple at once or repeat"),
+    imageInput,
+    imageList,
+    el("label", null, "Add a PDF (optional, replaces existing)"),
+    pdfInput,
+    pdfStatus,
+    el("label", null, "Link / YouTube URL (optional)"),
+    linkInput,
+    linkPreviewWrap,
+  ];
+
+  return {
+    fields,
+    getValues: () => ({
+      imageDataUrls: state.images,
+      pdfPages: state.pdfPages,
+      linkUrl: linkInput.value.trim(),
+      linkPreview: state.linkPreview,
+    }),
+  };
+}
+
 function openComposer() {
   if (!state.user) return;
   const titleInput = el("input", { type: "text", placeholder: "Title" });
   const descInput = el("textarea", { placeholder: "What's your idea, reflection, or answer?" });
-  const linkInput = el("input", { type: "url", placeholder: "https:// (optional link)" });
+  const editor = buildMediaEditor();
 
   let submitting = false;
   const submitBtn = el("button", { class: "btn", onclick: async () => {
     if (submitting) return;
     const title = titleInput.value.trim();
     const description = descInput.value.trim();
-    if (!title && !description) { toast("Add a title or description", "error"); return; }
+    const v = editor.getValues();
+    if (!title && !description && v.imageDataUrls.length === 0 && !v.linkUrl && !v.pdfPages) {
+      toast("Add a title, description, image, or link", "error"); return;
+    }
     submitting = true;
     submitBtn.textContent = "Posting…";
     try {
       await createPost(state.roomId, {
         title, description,
-        linkUrl: linkInput.value.trim(),
+        imageDataUrls: v.imageDataUrls,
+        linkUrl: v.linkUrl,
+        linkPreview: v.linkPreview,
+        pdfPages: v.pdfPages,
         authorName: displayNameOf(state.user),
+        onPdfProgress: (done, total) => {
+          submitBtn.textContent = `Uploading ${done}/${total}…`;
+        },
       });
       toast("Post added", "success");
       closeModal();
@@ -554,7 +1099,7 @@ function openComposer() {
     el("h2", null, "New post"),
     el("label", null, "Title"), titleInput,
     el("label", null, "Description"), descInput,
-    el("label", null, "Link (optional)"), linkInput,
+    ...editor.fields,
     el("div", { class: "modal-actions" },
       el("button", { class: "btn btn-secondary", onclick: closeModal }, "Cancel"),
       submitBtn,
@@ -564,32 +1109,91 @@ function openComposer() {
   setTimeout(() => titleInput.focus(), 50);
 }
 
+function buildLinkPreviewCard(url, preview) {
+  const card = el("a", {
+    class: "link-preview",
+    href: url,
+    target: "_blank",
+    rel: "noopener",
+    onclick: (e) => e.stopPropagation(),
+  });
+  if (preview.image) {
+    const img = document.createElement("img");
+    img.src = preview.image;
+    img.className = "link-preview-image";
+    img.loading = "lazy";
+    img.onerror = () => img.remove();
+    card.append(img);
+  }
+  const body = el("div", { class: "link-preview-body" });
+  if (preview.title) body.append(el("div", { class: "link-preview-title" }, preview.title));
+  if (preview.description) body.append(el("div", { class: "link-preview-desc" }, truncate(preview.description, 160)));
+  body.append(el("div", { class: "link-preview-host" }, shortUrl(url)));
+  card.append(body);
+  return card;
+}
+
 function openEdit(p) {
   const titleInput = el("input", { type: "text" });
   titleInput.value = p.title || "";
   const descInput = el("textarea");
   descInput.value = p.description || "";
-  const linkInput = el("input", { type: "url" });
-  linkInput.value = p.linkUrl || "";
+
+  // Existing images: prefer the new array; fall back to the legacy single field
+  const existingImages = Array.isArray(p.imageDataUrls) && p.imageDataUrls.length > 0
+    ? p.imageDataUrls
+    : (p.imageDataUrl && (typeof p.imageDataUrl === "string" && p.imageDataUrl.startsWith("data:"))
+        ? [p.imageDataUrl]
+        : (p.linkUrl && typeof p.linkUrl === "string" && p.linkUrl.startsWith("data:") ? [p.linkUrl] : []));
+
+  const editor = buildMediaEditor({
+    images: existingImages,
+    linkUrl: p.linkUrl && !p.linkUrl.startsWith("data:") ? p.linkUrl : "",
+    linkPreview: p.linkPreview,
+  });
+
+  let saving = false;
+  const saveBtn = el("button", { class: "btn", onclick: async () => {
+    if (saving) return;
+    saving = true;
+    saveBtn.textContent = "Saving…";
+    try {
+      const v = editor.getValues();
+      const patch = {
+        title: titleInput.value.trim(),
+        description: descInput.value.trim(),
+        imageDataUrls: v.imageDataUrls,
+        imageDataUrl: v.imageDataUrls[0] || "",
+        linkUrl: v.linkUrl,
+        linkPreview: v.linkPreview || null,
+      };
+      // If a new PDF was picked, replacing PDFs is complex (would need to delete old pages
+      // and write new ones). For now, surface a friendly note.
+      if (v.pdfPages && v.pdfPages.length > 0) {
+        toast("PDF replacement not supported in edit yet — delete the post and recreate to change the PDF.", "error");
+        saveBtn.textContent = "Save";
+        saving = false;
+        return;
+      }
+      await updatePost(p.id, patch);
+      toast("Saved", "success");
+      closeModal();
+    } catch (e) {
+      toast("Failed: " + (e.message || e.code), "error");
+      saveBtn.textContent = "Save";
+      saving = false;
+    }
+  }}, "Save");
 
   const node = el("div", null,
     el("h2", null, "Edit post"),
     el("label", null, "Title"), titleInput,
     el("label", null, "Description"), descInput,
-    el("label", null, "Link"), linkInput,
+    ...editor.fields,
+    p.pdfPageCount ? el("p", { class: "pdf-note" }, `This post has a ${p.pdfPageCount}-page PDF attached. To change it, delete the post and create a new one.`) : null,
     el("div", { class: "modal-actions" },
       el("button", { class: "btn btn-secondary", onclick: closeModal }, "Cancel"),
-      el("button", { class: "btn", onclick: async () => {
-        try {
-          await updatePost(p.id, {
-            title: titleInput.value.trim(),
-            description: descInput.value.trim(),
-            linkUrl: linkInput.value.trim(),
-          });
-          toast("Saved", "success");
-          closeModal();
-        } catch (e) { toast("Failed: " + (e.message || e.code), "error"); }
-      }}, "Save"),
+      saveBtn,
     ),
   );
   showModal(node);
