@@ -306,14 +306,23 @@ a:hover { text-decoration: underline; }
    Board layouts
    ============================================ */
 .board { padding: 28px 28px 96px; }
-.board:not(.board-sections) {
+.board:not(.board-sections):not(.board-landing) {
   column-count: 4;
   column-gap: 18px;
 }
-.board:not(.board-sections) > * { break-inside: avoid; margin-bottom: 18px; }
-@media (max-width: 1200px) { .board:not(.board-sections) { column-count: 3; } }
-@media (max-width: 840px)  { .board:not(.board-sections) { column-count: 2; padding: 20px; } }
-@media (max-width: 540px)  { .board:not(.board-sections) { column-count: 1; } }
+.board:not(.board-sections):not(.board-landing) > * { break-inside: avoid; margin-bottom: 18px; }
+@media (max-width: 1200px) { .board:not(.board-sections):not(.board-landing) { column-count: 3; } }
+@media (max-width: 840px)  { .board:not(.board-sections):not(.board-landing) { column-count: 2; padding: 20px; } }
+@media (max-width: 540px)  { .board:not(.board-sections):not(.board-landing) { column-count: 1; } }
+
+/* Landing variant — single-column flow, no masonry */
+.board.board-landing {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  column-count: unset;
+  padding: 8px 0 96px;
+}
 
 /* Padlet-style column sections */
 .board-sections {

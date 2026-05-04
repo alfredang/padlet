@@ -168,7 +168,9 @@ function showInRoomShell() {
   document.getElementById("fab").hidden = false;
   document.getElementById("announcement").classList.remove("hidden");
   document.getElementById("board-title-edit").hidden = false;
-  document.getElementById("board").innerHTML = "";
+  const board = document.getElementById("board");
+  board.classList.remove("board-landing");
+  board.innerHTML = "";
 }
 
 function showLanding() {
@@ -178,6 +180,7 @@ function showLanding() {
   document.getElementById("announcement").classList.add("hidden");
   document.getElementById("board-title-edit").hidden = true;
   document.getElementById("board-title").textContent = "Padlet Classrooms";
+  document.getElementById("board").classList.add("board-landing");
   renderLanding();
 }
 
@@ -188,6 +191,7 @@ function showJoinPrompt(code) {
   document.getElementById("announcement").classList.add("hidden");
   document.getElementById("board-title-edit").hidden = true;
   document.getElementById("board-title").textContent = "Join classroom " + code;
+  document.getElementById("board").classList.add("board-landing");
   renderJoinForm(code);
 }
 
