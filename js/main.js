@@ -1351,8 +1351,9 @@ function renderCommentThread(post, comments) {
     thread.append(el("div", { class: "comment-empty" }, "No comments yet — be the first."));
     return;
   }
+  const trainerHere = isTrainer(state.user, state.room);
   for (const c of comments) {
-    const canDelete = state.user && state.user.uid === c.authorId;
+    const canDelete = state.user && (state.user.uid === c.authorId || trainerHere);
     const node = el("div", { class: "comment" },
       canDelete ? el("button", {
         class: "delete-btn", title: "Delete",
