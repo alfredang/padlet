@@ -3,7 +3,7 @@ import { subscribePosts, subscribePdfPages, createPost, updatePost, deletePost, 
 import { subscribeComments, addComment, deleteComment } from "./comments.js";
 import {
   createRoom, joinRoom, subscribeRoom, updateRoomTitle, setAnnouncement, isTrainer,
-  recordMembership, fetchMyRooms,
+  recordMembership, fetchMyRooms, deleteRoom,
   createSection, updateSection, deleteSection, subscribeSections,
 } from "./rooms.js";
 import { exportCSV } from "./admin.js";
@@ -264,17 +264,38 @@ function renderLanding() {
         return;
       }
       for (const r of rooms) {
-        const row = el("div", { class: "recent-row" },
-          el("div", { class: "recent-info" },
-            el("div", { class: "recent-title" }, r.title || "Untitled Classroom"),
-            el("div", { class: "recent-code" }, r.code + (r.role === "trainer" ? " · trainer" : "")),
-          ),
+        const actions = [
           el("button", { class: "btn", onclick: () => {
             state.roomId = r.code;
             setRoomInURL(r.code);
             renderUserArea();
             enterRoom();
           }}, "Open"),
+        ];
+        if (r.role === "trainer") {
+          actions.push(el("button", {
+            class: "btn-ghost recent-delete",
+            title: "Delete classroom",
+            onclick: async (e) => {
+              e.stopPropagation();
+              if (!confirm(`Delete classroom "${r.title || "Untitled Classroom"}" (${r.code})?\n\nThis will remove the classroom, its sections, and your own posts. Posts created by other people may remain.`)) return;
+              try {
+                await deleteRoom(r.code);
+                removeRecentRoom(r.code);
+                toast("Classroom deleted", "success");
+                renderLanding();
+              } catch (err) {
+                toast("Delete failed: " + (err.message || err.code), "error");
+              }
+            },
+          }, "🗑"));
+        }
+        const row = el("div", { class: "recent-row" },
+          el("div", { class: "recent-info" },
+            el("div", { class: "recent-title" }, r.title || "Untitled Classroom"),
+            el("div", { class: "recent-code" }, r.code + (r.role === "trainer" ? " · trainer" : "")),
+          ),
+          ...actions,
         );
         list.append(row);
       }
@@ -865,9 +886,13 @@ function postCard(p) {
     img.onclick = (e) => e.stopPropagation();
     card.append(img);
   }
-  // Typed link / YouTube / preview (separate from the upload)
-  if (p.linkUrl && !p.linkUrl.startsWith("data:")) {
-    const media = renderMediaOrLink(p.linkUrl, false, p.linkPreview);
+  // Typed link(s) / YouTube / previews — multi-link supported via linkUrls[]
+  const cardLinks = Array.isArray(p.linkUrls) && p.linkUrls.length > 0
+    ? p.linkUrls.map((url, i) => ({ url, preview: (p.linkPreviews && p.linkPreviews[i]) || null }))
+    : (p.linkUrl && !p.linkUrl.startsWith("data:") ? [{ url: p.linkUrl, preview: p.linkPreview }] : []);
+  for (const { url, preview } of cardLinks) {
+    if (!url || url.startsWith("data:")) continue;
+    const media = renderMediaOrLink(url, false, preview);
     if (media) card.append(media);
   }
   if (p.title) card.append(el("h3", { class: "post-title" }, p.title));
@@ -1167,8 +1192,12 @@ function buildDetailNode(p) {
       img.className = "detail-image";
       node.append(img);
     }
-    if (p.linkUrl && !p.linkUrl.startsWith("data:")) {
-      const media = renderMediaOrLink(p.linkUrl, true, p.linkPreview);
+    const detailLinks = Array.isArray(p.linkUrls) && p.linkUrls.length > 0
+      ? p.linkUrls.map((url, i) => ({ url, preview: (p.linkPreviews && p.linkPreviews[i]) || null }))
+      : (p.linkUrl && !p.linkUrl.startsWith("data:") ? [{ url: p.linkUrl, preview: p.linkPreview }] : []);
+    for (const { url, preview } of detailLinks) {
+      if (!url || url.startsWith("data:")) continue;
+      const media = renderMediaOrLink(url, true, preview);
       if (media) node.append(media);
     }
   }
@@ -1232,24 +1261,82 @@ function confirmDelete(p) {
 }
 
 function buildMediaEditor(initial = {}) {
+  // Resolve initial links: prefer arrays, fall back to legacy single fields
+  const initialLinks = (() => {
+    if (Array.isArray(initial.linkUrls) && initial.linkUrls.length > 0) {
+      const previews = Array.isArray(initial.linkPreviews) ? initial.linkPreviews : [];
+      return initial.linkUrls.map((url, i) => ({ url: url || "", preview: previews[i] || null }));
+    }
+    if (initial.linkUrl) return [{ url: initial.linkUrl, preview: initial.linkPreview || null }];
+    return [];
+  })();
+
   const state = {
     images: Array.isArray(initial.images) ? [...initial.images] : [],
     pdfPages: null,
-    linkPreview: initial.linkPreview || null,
+    links: initialLinks,
   };
 
   const imageInput = el("input", { type: "file", accept: "image/*", multiple: true, hidden: true });
   const imageList = el("div", { class: "image-list" });
   const pdfInput = el("input", { type: "file", accept: "application/pdf", hidden: true });
   const pdfStatus = el("div", { class: "pdf-status" });
-  const linkInput = el("input", { type: "url", class: "composer-link-input", placeholder: "Paste a link or YouTube URL" });
-  const linkBar = el("div", { class: "composer-link-bar" }, linkInput);
-  if (initial.linkUrl) { linkInput.value = initial.linkUrl; }
-  else { linkBar.hidden = true; }
-  const linkPreviewWrap = el("div", { class: "link-preview-wrap" });
-  if (initial.linkPreview && initial.linkUrl) {
-    linkPreviewWrap.append(buildLinkPreviewCard(initial.linkUrl, initial.linkPreview));
+  const linksContainer = el("div", { class: "composer-links" });
+
+  function renderLinks() {
+    linksContainer.innerHTML = "";
+    linksContainer.hidden = state.links.length === 0;
+    state.links.forEach((link, idx) => {
+      const input = el("input", { type: "url", class: "composer-link-input", placeholder: "Paste a link or YouTube URL" });
+      input.value = link.url || "";
+      const previewWrap = el("div", { class: "link-preview-wrap" });
+      if (link.preview && link.url) previewWrap.append(buildLinkPreviewCard(link.url, link.preview));
+
+      input.addEventListener("input", () => { state.links[idx].url = input.value; });
+      input.addEventListener("blur", async () => {
+        const url = input.value.trim();
+        state.links[idx].url = url;
+        state.links[idx].preview = null;
+        previewWrap.innerHTML = "";
+        if (!url || isImageUrl(url) || youtubeEmbedUrl(url)) return;
+        previewWrap.textContent = "Fetching preview…";
+        try {
+          const p = await fetchLinkPreview(url);
+          if (!p.title && !p.image) { previewWrap.innerHTML = ""; return; }
+          state.links[idx].preview = p;
+          previewWrap.innerHTML = "";
+          previewWrap.append(buildLinkPreviewCard(url, p));
+        } catch {
+          previewWrap.innerHTML = "";
+        }
+      });
+
+      const remove = el("button", { type: "button", class: "composer-link-remove", title: "Remove link", onclick: () => {
+        state.links.splice(idx, 1);
+        renderLinks();
+      }}, "×");
+
+      linksContainer.append(
+        el("div", { class: "composer-link-row" }, input, remove),
+        previewWrap,
+      );
+    });
+
+    if (state.links.length > 0) {
+      linksContainer.append(el("button", {
+        type: "button",
+        class: "composer-add-more",
+        onclick: () => {
+          state.links.push({ url: "", preview: null });
+          renderLinks();
+          const inputs = linksContainer.querySelectorAll(".composer-link-input");
+          const last = inputs[inputs.length - 1];
+          if (last) last.focus();
+        },
+      }, "+ Add another link"));
+    }
   }
+  renderLinks();
 
   function renderImages() {
     imageList.innerHTML = "";
@@ -1317,23 +1404,6 @@ function buildMediaEditor(initial = {}) {
     }
   });
 
-  linkInput.addEventListener("blur", async () => {
-    const url = linkInput.value.trim();
-    state.linkPreview = null;
-    linkPreviewWrap.innerHTML = "";
-    if (!url || isImageUrl(url) || youtubeEmbedUrl(url)) return;
-    linkPreviewWrap.textContent = "Fetching preview…";
-    try {
-      const p = await fetchLinkPreview(url);
-      if (!p.title && !p.image) { linkPreviewWrap.innerHTML = ""; return; }
-      state.linkPreview = p;
-      linkPreviewWrap.innerHTML = "";
-      linkPreviewWrap.append(buildLinkPreviewCard(url, p));
-    } catch {
-      linkPreviewWrap.innerHTML = "";
-    }
-  });
-
   const tile = (icon, label, onClick, title) => el("button", {
     type: "button",
     class: "composer-tile",
@@ -1348,9 +1418,13 @@ function buildMediaEditor(initial = {}) {
     tile("🖼️", "Image", () => imageInput.click(), "Upload one or more images"),
     tile("📄", "PDF", () => pdfInput.click(), "Upload a PDF"),
     tile("🔗", "Link", () => {
-      linkBar.hidden = !linkBar.hidden;
-      if (!linkBar.hidden) setTimeout(() => linkInput.focus(), 30);
-    }, "Add a link or YouTube URL"),
+      // Always append a new empty link row and focus it. Multi-link supported.
+      state.links.push({ url: "", preview: null });
+      renderLinks();
+      const inputs = linksContainer.querySelectorAll(".composer-link-input");
+      const last = inputs[inputs.length - 1];
+      if (last) setTimeout(() => last.focus(), 30);
+    }, "Add a link or YouTube URL — click multiple times to add more"),
   );
 
   const tilesArea = el("div", { class: "composer-tiles-wrap" },
@@ -1363,19 +1437,26 @@ function buildMediaEditor(initial = {}) {
     pdfInput,
     imageList,
     pdfStatus,
-    linkBar,
-    linkPreviewWrap,
+    linksContainer,
   );
 
   return {
     tilesArea,
     attachments,
-    getValues: () => ({
-      imageDataUrls: state.images,
-      pdfPages: state.pdfPages,
-      linkUrl: linkInput.value.trim(),
-      linkPreview: state.linkPreview,
-    }),
+    getValues: () => {
+      const valid = state.links.filter((l) => (l.url || "").trim());
+      const linkUrls = valid.map((l) => l.url.trim());
+      const linkPreviews = valid.map((l) => l.preview || null);
+      return {
+        imageDataUrls: state.images,
+        pdfPages: state.pdfPages,
+        linkUrls,
+        linkPreviews,
+        // Backward compat — first link
+        linkUrl: linkUrls[0] || "",
+        linkPreview: linkPreviews[0] || null,
+      };
+    },
   };
 }
 
@@ -1413,7 +1494,7 @@ function openComposer(defaultSectionId) {
     const title = titleInput.value.trim();
     const description = descInput.value.trim();
     const v = editor.getValues();
-    if (!title && !description && v.imageDataUrls.length === 0 && !v.linkUrl && !v.pdfPages) {
+    if (!title && !description && v.imageDataUrls.length === 0 && v.linkUrls.length === 0 && !v.pdfPages) {
       toast("Add a subject, description, image, or link", "error"); return;
     }
     submitting = true;
@@ -1425,6 +1506,8 @@ function openComposer(defaultSectionId) {
         imageDataUrls: v.imageDataUrls,
         linkUrl: v.linkUrl,
         linkPreview: v.linkPreview,
+        linkUrls: v.linkUrls,
+        linkPreviews: v.linkPreviews,
         pdfPages: v.pdfPages,
         authorName: displayNameOf(state.user),
         onPdfProgress: (done, total) => {
@@ -1496,10 +1579,18 @@ function openEdit(p) {
         ? [p.imageDataUrl]
         : (p.linkUrl && typeof p.linkUrl === "string" && p.linkUrl.startsWith("data:") ? [p.linkUrl] : []));
 
+  // Resolve initial links from new arrays first, fall back to legacy single field
+  const initialLinkUrls = Array.isArray(p.linkUrls) && p.linkUrls.length > 0
+    ? p.linkUrls
+    : (p.linkUrl && !p.linkUrl.startsWith("data:") ? [p.linkUrl] : []);
+  const initialLinkPreviews = Array.isArray(p.linkPreviews) && p.linkPreviews.length > 0
+    ? p.linkPreviews
+    : (p.linkPreview ? [p.linkPreview] : []);
+
   const editor = buildMediaEditor({
     images: existingImages,
-    linkUrl: p.linkUrl && !p.linkUrl.startsWith("data:") ? p.linkUrl : "",
-    linkPreview: p.linkPreview,
+    linkUrls: initialLinkUrls,
+    linkPreviews: initialLinkPreviews,
   });
 
   let saving = false;
@@ -1514,6 +1605,8 @@ function openEdit(p) {
         description: descInput.value.trim(),
         imageDataUrls: v.imageDataUrls,
         imageDataUrl: v.imageDataUrls[0] || "",
+        linkUrls: v.linkUrls,
+        linkPreviews: v.linkPreviews,
         linkUrl: v.linkUrl,
         linkPreview: v.linkPreview || null,
       };

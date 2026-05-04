@@ -991,12 +991,20 @@ a:hover { text-decoration: underline; }
 .composer-attachments .image-list:empty,
 .composer-attachments .pdf-status:empty { margin: 0; }
 
-.composer-link-bar {
+.composer-links {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
   margin: 6px 0;
 }
-.composer-link-bar[hidden] { display: none; }
+.composer-links[hidden] { display: none; }
+.composer-link-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
 .composer-link-input {
-  width: 100%;
+  flex: 1;
   padding: 10px 14px;
   border-radius: 10px;
   border: 1px solid var(--border);
@@ -1008,6 +1016,44 @@ a:hover { text-decoration: underline; }
 .composer-link-input:focus {
   border-color: var(--accent);
   box-shadow: 0 0 0 3px var(--accent-soft);
+}
+.composer-link-remove {
+  width: 32px;
+  height: 32px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--muted);
+  border-radius: 8px;
+  font-size: 18px;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+.composer-link-remove:hover {
+  background: rgba(239, 68, 68, 0.10);
+  color: var(--danger);
+  border-color: var(--danger);
+}
+.composer-add-more {
+  align-self: flex-start;
+  background: transparent;
+  border: 1px dashed var(--border-strong);
+  color: var(--accent);
+  padding: 6px 12px;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  margin-top: 2px;
+  transition: background 0.15s, border-color 0.15s;
+}
+.composer-add-more:hover {
+  background: var(--accent-soft);
+  border-color: var(--accent);
 }
 
 .composer-section-row {
@@ -1339,6 +1385,14 @@ a:hover { text-decoration: underline; }
   line-height: 1;
   padding: 4px 10px;
 }
+.recent-delete {
+  font-size: 16px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  color: var(--muted);
+  transition: background 0.15s, color 0.15s;
+}
+.recent-delete:hover { background: rgba(239, 68, 68, 0.10); color: var(--danger); }
 
 /* ============================================
    Animations

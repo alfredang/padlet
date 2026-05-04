@@ -90,6 +90,40 @@ export function isTrainer(user, room) {
   return !!(room && user && room.authorId === user.uid);
 }
 
+// Delete a classroom and best-effort cascade cleanup of its sections, posts,
+// memberships, and comments. Some child docs may fail to delete under Firestore
+// rules (e.g., posts authored by students) — those are skipped silently.
+export async function deleteRoom(roomId) {
+  const user = auth.currentUser;
+  if (!user) throw new Error("not signed in");
+  const roomRef = doc(db, "posts", roomId);
+  const roomSnap = await getDoc(roomRef);
+  if (!roomSnap.exists()) throw new Error("Classroom not found");
+  if (roomSnap.data().authorId !== user.uid) {
+    throw new Error("Only the trainer can delete this classroom");
+  }
+  try {
+    const q = query(collection(db, "posts"), where("roomId", "==", roomId));
+    const snap = await getDocs(q);
+    await Promise.all(snap.docs
+      .filter((d) => d.data().type !== "room")
+      .map(async (d) => {
+        try {
+          const t = d.data().type;
+          if (!t || t === "post") {
+            const cq = query(collection(db, "comments"), where("postId", "==", d.id));
+            const cs = await getDocs(cq);
+            await Promise.all(cs.docs.map((c) => deleteDoc(c.ref).catch(() => {})));
+          }
+          await deleteDoc(d.ref);
+        } catch (e) {
+          console.warn("could not delete child doc", d.id, e);
+        }
+      }));
+  } catch (e) { console.warn("cascade cleanup partial failure", e); }
+  await deleteDoc(roomRef);
+}
+
 // Membership records let signed-in users see the rooms they've joined across
 // any device (as long as they sign in with the same account). Stored as a
 // type="membership" doc in the posts collection so it works under existing

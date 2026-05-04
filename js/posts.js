@@ -47,13 +47,15 @@ export function subscribePdfPages(postId, cb) {
   });
 }
 
-export async function createPost(roomId, { title, description, category, sectionId, linkUrl, imageDataUrls, linkPreview, pdfPages, authorName, onPdfProgress }) {
+export async function createPost(roomId, { title, description, category, sectionId, linkUrl, linkUrls, linkPreviews, imageDataUrls, linkPreview, pdfPages, authorName, onPdfProgress }) {
   const user = auth.currentUser;
   if (!user) throw new Error("not signed in");
   const hasPdf = Array.isArray(pdfPages) && pdfPages.length > 0;
   const images = Array.isArray(imageDataUrls) ? imageDataUrls.filter(Boolean) : [];
   const cover = hasPdf ? pdfPages[0] : (images[0] || "");
   const author = authorName || user.displayName || "Guest";
+  const linksArr = Array.isArray(linkUrls) ? linkUrls.filter(Boolean) : (linkUrl ? [linkUrl] : []);
+  const previewsArr = Array.isArray(linkPreviews) ? linkPreviews : (linkPreview ? [linkPreview] : []);
   const mainRef = await addDoc(POSTS, {
     type: "post",
     roomId,
@@ -63,8 +65,10 @@ export async function createPost(roomId, { title, description, category, section
     category: category || "",
     imageDataUrl: cover,           // legacy single field — kept for backward compat readers
     imageDataUrls: images,          // new: array of all images
-    linkUrl: linkUrl || "",
-    linkPreview: linkPreview || null,
+    linkUrl: linksArr[0] || "",     // legacy single field — first link
+    linkPreview: previewsArr[0] || null, // legacy single field — first preview
+    linkUrls: linksArr,             // new: array of all links
+    linkPreviews: previewsArr,      // new: array of previews aligned with linkUrls
     pdfPageCount: hasPdf ? pdfPages.length : 0,
     authorId: user.uid,
     authorName: author,
