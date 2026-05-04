@@ -176,7 +176,7 @@ export async function fetchMyRooms() {
 export async function createSection(roomId, title, opts = {}) {
   const user = auth.currentUser;
   if (!user) throw new Error("not signed in");
-  await addDoc(collection(db, "posts"), {
+  const ref = await addDoc(collection(db, "posts"), {
     type: "section",
     roomId,
     parentSectionId: opts.parentSectionId || null,
@@ -186,6 +186,7 @@ export async function createSection(roomId, title, opts = {}) {
     pinned: false,
     createdAt: serverTimestamp(),
   });
+  return ref.id;
 }
 
 export async function updateSection(sectionId, patch) {

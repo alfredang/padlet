@@ -74,6 +74,12 @@ function wireToolbar() {
     exportCSV(state.posts);
     toast("CSV downloaded", "success");
   });
+  document.getElementById("refresh-posts").addEventListener("click", () => {
+    if (state._reattachSubscriptions) {
+      state._reattachSubscriptions();
+      toast("Reconnected — posts refreshed", "success");
+    }
+  });
 }
 
 function wireFab() {
@@ -132,6 +138,9 @@ function handleAuthChange(user) {
 
 function enterRoom() {
   showInRoomShell();
+  state.postsRetryDelay = 1000;
+  state.sectionsRetryDelay = 1000;
+
   state.unsubRoom = subscribeRoom(state.roomId, (room, err) => {
     if (err || !room) {
       toast(err ? ("Room error: " + (err.message || err.code)) : "Room not found", "error");
@@ -148,24 +157,55 @@ function enterRoom() {
     renderAnnouncement(room.announcement);
     renderUserArea();
   });
-  state.unsubPosts = subscribePosts(state.roomId, (items, err) => {
-    if (err) { toast("Failed to load posts: " + (err.message || err.code), "error"); return; }
-    state.posts = items;
-    renderBoard();
-    if (state.detailOpenFor) {
-      const fresh = state.posts.find((p) => p.id === state.detailOpenFor);
-      if (fresh) refreshDetailModal(fresh);
-    }
-  });
-  state.unsubSections = subscribeSections(state.roomId, (sections) => {
-    state.sections = sections;
-    renderBoard();
-  });
+
+  function attachPosts() {
+    if (state.unsubPosts) { state.unsubPosts(); state.unsubPosts = null; }
+    state.unsubPosts = subscribePosts(state.roomId, (items, err) => {
+      if (err) {
+        console.error("subscribePosts error — retrying", err);
+        toast("Posts disconnected — reconnecting…", "info");
+        const delay = Math.min(state.postsRetryDelay, 30000);
+        state.postsRetryDelay = Math.min(delay * 2, 30000);
+        setTimeout(() => { if (state.roomId) attachPosts(); }, delay);
+        return;
+      }
+      state.postsRetryDelay = 1000;
+      state.posts = items;
+      console.log("[posts]", items.length, "loaded for room", state.roomId);
+      renderBoard();
+      if (state.detailOpenFor) {
+        const fresh = state.posts.find((p) => p.id === state.detailOpenFor);
+        if (fresh) refreshDetailModal(fresh);
+      }
+    });
+  }
+
+  function attachSections() {
+    if (state.unsubSections) { state.unsubSections(); state.unsubSections = null; }
+    state.unsubSections = subscribeSections(state.roomId, (sections, err) => {
+      if (err) {
+        console.error("subscribeSections error — retrying", err);
+        const delay = Math.min(state.sectionsRetryDelay, 30000);
+        state.sectionsRetryDelay = Math.min(delay * 2, 30000);
+        setTimeout(() => { if (state.roomId) attachSections(); }, delay);
+        return;
+      }
+      state.sectionsRetryDelay = 1000;
+      state.sections = sections;
+      renderBoard();
+    });
+  }
+
+  state._reattachSubscriptions = () => { attachPosts(); attachSections(); };
+  attachPosts();
+  attachSections();
 }
 
 function showInRoomShell() {
   document.getElementById("toolbar").hidden = false;
   document.getElementById("fab").hidden = false;
+  const refreshBtn = document.getElementById("refresh-posts");
+  if (refreshBtn) refreshBtn.hidden = false;
   document.getElementById("announcement").classList.remove("hidden");
   document.getElementById("board-title-edit").hidden = false;
   const board = document.getElementById("board");
@@ -177,6 +217,8 @@ function showLanding() {
   document.getElementById("toolbar").hidden = true;
   document.getElementById("fab").hidden = true;
   document.getElementById("export-csv").hidden = true;
+  const refreshBtn = document.getElementById("refresh-posts");
+  if (refreshBtn) refreshBtn.hidden = true;
   document.getElementById("announcement").classList.add("hidden");
   document.getElementById("board-title-edit").hidden = true;
   document.getElementById("board-title").textContent = "Padlet Classrooms";
@@ -610,8 +652,8 @@ function renderBoard() {
     board.append(buildOrphanColumn(orphans, topSections.length === 0));
   }
 
-  // Trainer "+ Add section" tile at the end
-  if (trainer) {
+  // "+ Add section" tile — any signed-in user can add a section
+  if (state.user) {
     const addBtn = el("button", { class: "section-add-btn", onclick: () => openAddSectionModal(null) },
       el("div", { class: "section-add-icon" }, "+"),
       el("div", null, "Add a section"),
@@ -628,7 +670,7 @@ function buildOrphanColumn(orphans, isOnlyColumn) {
   if (state.user && !isOnlyColumn) {
     header.append(el("div", { class: "section-actions" },
       el("button", { class: "btn-ghost", title: "Add post", onclick: (e) => { e.stopPropagation(); openComposer(null); } }, "➕"),
-      el("button", { class: "btn-ghost", title: "Rename", onclick: (e) => { e.stopPropagation(); toast("Uncategorized is the default bucket — it can't be renamed.", "info"); } }, "✏️"),
+      el("button", { class: "btn-ghost", title: "Rename — converts Uncategorized into a real section", onclick: (e) => { e.stopPropagation(); openRenameUncategorizedModal(orphans); } }, "✏️"),
       el("button", { class: "btn-ghost", title: "Remove column (moves posts to first section)", onclick: async (e) => {
         e.stopPropagation();
         const firstSection = (state.sections || []).find((s) => !s.parentSectionId);
@@ -685,16 +727,23 @@ function buildOrphanColumn(orphans, isOnlyColumn) {
 function buildSectionColumn(section, postsBySection, subsByParent, trainer) {
   const col = el("section", { class: "section-column" });
 
-  // Header with title + (trainer) actions + section reorder drag
+  // Header with title + (trainer / author) actions + section reorder drag
   const header = el("div", { class: "section-header" },
     el("h3", { class: "section-title" }, section.title || "Untitled"),
   );
+  const ownsSection = state.user && section.authorId === state.user.uid;
+  const canManageSection = trainer || ownsSection;
+  if (state.user && section.id) {
+    const actions = el("div", { class: "section-actions" });
+    // Anyone signed in can add a sub-section
+    actions.append(el("button", { class: "btn-ghost", title: "Add sub-section", onclick: (e) => { e.stopPropagation(); openAddSectionModal(section.id); } }, "➕"));
+    if (canManageSection) {
+      actions.append(el("button", { class: "btn-ghost", title: "Rename", onclick: (e) => { e.stopPropagation(); openRenameSectionModal(section); } }, "✏️"));
+      actions.append(el("button", { class: "btn-ghost", title: "Delete", onclick: (e) => { e.stopPropagation(); confirmDeleteSection(section); } }, "🗑"));
+    }
+    header.append(actions);
+  }
   if (trainer && section.id) {
-    header.append(el("div", { class: "section-actions" },
-      el("button", { class: "btn-ghost", title: "Add sub-section", onclick: (e) => { e.stopPropagation(); openAddSectionModal(section.id); } }, "➕"),
-      el("button", { class: "btn-ghost", title: "Rename", onclick: (e) => { e.stopPropagation(); openRenameSectionModal(section); } }, "✏️"),
-      el("button", { class: "btn-ghost", title: "Delete", onclick: (e) => { e.stopPropagation(); confirmDeleteSection(section); } }, "🗑"),
-    ));
     header.draggable = true;
     header.style.cursor = "grab";
     header.addEventListener("dragstart", (e) => {
@@ -757,7 +806,8 @@ function buildSubSection(sub, posts, trainer) {
   const header = el("div", { class: "sub-section-header" },
     el("span", { class: "sub-section-title" }, "↳ " + (sub.title || "Untitled")),
   );
-  if (trainer) {
+  const ownsSub = state.user && sub.authorId === state.user.uid;
+  if (trainer || ownsSub) {
     header.append(el("div", { class: "sub-section-actions" },
       el("button", { class: "btn-ghost", title: "Rename", onclick: (e) => { e.stopPropagation(); openRenameSectionModal(sub); } }, "✏️"),
       el("button", { class: "btn-ghost", title: "Delete", onclick: (e) => { e.stopPropagation(); confirmDeleteSection(sub); } }, "🗑"),
@@ -806,7 +856,7 @@ function buildPostsDropZone(posts, sectionId) {
 }
 
 function openAddSectionModal(parentSectionId) {
-  if (!isTrainer(state.user, state.room)) return;
+  if (!state.user) { toast("Sign in to add a section.", "error"); return; }
   const isSub = !!parentSectionId;
   const parent = isSub ? state.sections.find((s) => s.id === parentSectionId) : null;
   const input = el("input", { type: "text", placeholder: isSub ? "Sub-section name" : "Section name" });
@@ -827,8 +877,49 @@ function openAddSectionModal(parentSectionId) {
   setTimeout(() => input.focus(), 50);
 }
 
+function openRenameUncategorizedModal(orphans) {
+  if (!isTrainer(state.user, state.room)) {
+    toast("Only the trainer can rename sections.", "error");
+    return;
+  }
+  const input = el("input", { type: "text", placeholder: "Section name (e.g. General)" });
+  const node = el("div", null,
+    el("h2", null, "Rename Uncategorized"),
+    el("p", { class: "landing-hint" }, `This will create a new section with the name you choose and move ${orphans.length} post${orphans.length === 1 ? "" : "s"} into it.`),
+    el("label", null, "Section name"), input,
+    el("div", { class: "modal-actions" },
+      el("button", { class: "btn btn-secondary", onclick: closeModal }, "Cancel"),
+      el("button", { class: "btn", onclick: async () => {
+        const name = input.value.trim();
+        if (!name) { toast("Section needs a name", "error"); return; }
+        try {
+          const newId = await createSection(state.roomId, name);
+          let movedCount = 0;
+          let skipped = 0;
+          await Promise.all(orphans.map(async (p) => {
+            try { await updatePost(p.id, { sectionId: newId }); movedCount++; }
+            catch { skipped++; }
+          }));
+          if (skipped > 0) {
+            toast(`Renamed. Moved ${movedCount} post${movedCount === 1 ? "" : "s"} — ${skipped} couldn't be moved (only authors can move their own posts).`, "info");
+          } else {
+            toast(`Renamed Uncategorized to "${name}"`, "success");
+          }
+          closeModal();
+        } catch (e) {
+          toast("Failed: " + (e.message || e.code), "error");
+        }
+      }}, "Rename"),
+    ),
+  );
+  showModal(node);
+  setTimeout(() => input.focus(), 50);
+}
+
 function openRenameSectionModal(section) {
-  if (!isTrainer(state.user, state.room)) return;
+  const trainer = isTrainer(state.user, state.room);
+  const owns = state.user && section.authorId === state.user.uid;
+  if (!trainer && !owns) { toast("Only the trainer or the section's creator can rename it.", "error"); return; }
   const input = el("input", { type: "text" });
   input.value = section.title || "";
   const node = el("div", null,
@@ -849,7 +940,9 @@ function openRenameSectionModal(section) {
 }
 
 function confirmDeleteSection(section) {
-  if (!isTrainer(state.user, state.room)) return;
+  const trainer = isTrainer(state.user, state.room);
+  const owns = state.user && section.authorId === state.user.uid;
+  if (!trainer && !owns) { toast("Only the trainer or the section's creator can delete it.", "error"); return; }
   const subs = state.sections.filter((s) => s.parentSectionId === section.id);
   const postsInThis = state.posts.filter((p) => p.sectionId === section.id).length;
   const postsInSubs = state.posts.filter((p) => subs.some((s) => s.id === p.sectionId)).length;
@@ -1225,6 +1318,8 @@ function buildDetailNode(p) {
   }, el("span", { class: "heart" }, liked ? "♥" : "♡"), `${(p.likes || []).length} like${(p.likes || []).length === 1 ? "" : "s"}`));
   if (own) {
     actions.append(el("button", { class: "btn-secondary btn", onclick: () => openEdit(p) }, "Edit"));
+  }
+  if (own || trainer) {
     actions.append(el("button", { class: "btn-danger btn", onclick: () => confirmDelete(p) }, "Delete"));
   }
   node.append(actions);

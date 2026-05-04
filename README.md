@@ -128,6 +128,14 @@ service cloud.firestore {
       return isSignedIn()
         && request.auth.token.email in ['angch@tertiaryinfotech.com'];
     }
+    // The trainer of a room is the user who created the room doc (which has
+    // type=="room" and shares the room code as its postId).
+    function isRoomTrainer(roomId) {
+      return isSignedIn()
+        && roomId != null
+        && exists(/databases/$(db)/documents/posts/$(roomId))
+        && get(/databases/$(db)/documents/posts/$(roomId)).data.authorId == request.auth.uid;
+    }
 
     match /posts/{postId} {
       allow read: if isSignedIn();
@@ -140,14 +148,24 @@ service cloud.firestore {
             && request.resource.data.authorId == resource.data.authorId
             && request.resource.data.pinned == resource.data.pinned)
         || (isSignedIn()
-            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['likes', 'updatedAt']));
-      allow delete: if isAdmin() || (isSignedIn() && resource.data.authorId == request.auth.uid);
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['likes', 'updatedAt']))
+        // Trainer can pin/unpin and otherwise edit posts in their own room
+        || isRoomTrainer(resource.data.roomId);
+      allow delete: if isAdmin()
+        || (isSignedIn() && resource.data.authorId == request.auth.uid)
+        // Trainer can delete any post in their own room
+        || isRoomTrainer(resource.data.roomId);
     }
 
     match /comments/{commentId} {
       allow read: if isSignedIn();
       allow create: if isSignedIn() && request.resource.data.authorId == request.auth.uid;
-      allow delete: if isAdmin() || (isSignedIn() && resource.data.authorId == request.auth.uid);
+      allow delete: if isAdmin()
+        || (isSignedIn() && resource.data.authorId == request.auth.uid)
+        // Trainer can delete any comment on a post in their own room
+        || (isSignedIn()
+            && exists(/databases/$(db)/documents/posts/$(resource.data.postId))
+            && isRoomTrainer(get(/databases/$(db)/documents/posts/$(resource.data.postId)).data.roomId));
       allow update: if false;
     }
 
@@ -158,6 +176,9 @@ service cloud.firestore {
   }
 }
 ```
+
+> **You must paste the updated rules into Firebase Console → Firestore → Rules.**
+> Without that step, the trainer-can-delete-any-post UI will fail with a permission error when the trainer tries to delete a non-own post.
 
 ## Storage rules
 

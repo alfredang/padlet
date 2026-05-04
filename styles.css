@@ -70,6 +70,50 @@ body {
   line-height: 1.5;
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
+  position: relative;
+  overflow-x: hidden;
+}
+
+/* Drifting gradient orbs — purely decorative, sit behind everything */
+body::before,
+body::after {
+  content: "";
+  position: fixed;
+  border-radius: 50%;
+  filter: blur(90px);
+  opacity: 0.55;
+  pointer-events: none;
+  z-index: -1;
+  will-change: transform;
+}
+body::before {
+  width: 520px;
+  height: 520px;
+  top: -160px;
+  left: -120px;
+  background: radial-gradient(circle, rgba(124, 58, 237, 0.45), transparent 70%);
+  animation: orb-drift-1 22s ease-in-out infinite alternate;
+}
+body::after {
+  width: 600px;
+  height: 600px;
+  bottom: -200px;
+  right: -180px;
+  background: radial-gradient(circle, rgba(236, 72, 153, 0.35), transparent 70%);
+  animation: orb-drift-2 28s ease-in-out infinite alternate;
+}
+.dark body::before { background: radial-gradient(circle, rgba(167, 139, 250, 0.45), transparent 70%); opacity: 0.45; }
+.dark body::after  { background: radial-gradient(circle, rgba(236, 72, 153, 0.30), transparent 70%); opacity: 0.40; }
+
+@keyframes orb-drift-1 {
+  0%   { transform: translate3d(0, 0, 0) scale(1); }
+  50%  { transform: translate3d(60px, 80px, 0) scale(1.08); }
+  100% { transform: translate3d(120px, 30px, 0) scale(1.04); }
+}
+@keyframes orb-drift-2 {
+  0%   { transform: translate3d(0, 0, 0) scale(1); }
+  50%  { transform: translate3d(-80px, -60px, 0) scale(1.06); }
+  100% { transform: translate3d(-30px, -120px, 0) scale(1.10); }
 }
 button { font: inherit; cursor: pointer; }
 input, textarea, select { font: inherit; color: inherit; }
