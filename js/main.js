@@ -1024,11 +1024,26 @@ function setPreviewCache(cache) {
 
 async function fetchLinkPreview(url) {
   const cache = getPreviewCache();
-  if (cache[url]) return cache[url];
-  const proxyUrl = "https://corsproxy.io/?" + encodeURIComponent(url);
-  const res = await fetch(proxyUrl);
-  if (!res.ok) throw new Error("preview fetch failed");
-  const html = await res.text();
+  const cached = cache[url];
+  // Only trust cache when it has useful data — empty entries retry next time
+  if (cached && (cached.title || cached.image)) return cached;
+
+  // Try multiple CORS proxies — different proxies have different success rates
+  // for different sites, so we fall through on failure
+  const proxies = [
+    (u) => "https://corsproxy.io/?" + encodeURIComponent(u),
+    (u) => "https://api.allorigins.win/raw?url=" + encodeURIComponent(u),
+    (u) => "https://api.codetabs.com/v1/proxy?quest=" + encodeURIComponent(u),
+  ];
+  let html = null;
+  for (const buildUrl of proxies) {
+    try {
+      const res = await fetch(buildUrl(url));
+      if (res.ok) { html = await res.text(); if (html) break; }
+    } catch {}
+  }
+  if (!html) throw new Error("preview fetch failed");
+
   const doc = new DOMParser().parseFromString(html, "text/html");
   const meta = (sel) => doc.querySelector(sel)?.getAttribute("content") || "";
   const preview = {
@@ -1050,8 +1065,11 @@ async function fetchLinkPreview(url) {
   if (preview.image && !/^https?:/i.test(preview.image)) {
     try { preview.image = new URL(preview.image, url).href; } catch {}
   }
-  cache[url] = preview;
-  setPreviewCache(cache);
+  // Only cache useful results so empty fetches can be retried later
+  if (preview.title || preview.image) {
+    cache[url] = preview;
+    setPreviewCache(cache);
+  }
   return preview;
 }
 
@@ -1090,16 +1108,9 @@ function renderMediaOrLink(url, isDetail, preview) {
     img.onclick = (e) => e.stopPropagation();
     return img;
   }
-  if (preview && (preview.image || preview.title)) {
-    return buildLinkPreviewCard(url, preview);
-  }
-  return el("a", {
-    class: "post-link",
-    href: url,
-    target: "_blank",
-    rel: "noopener",
-    onclick: (e) => e.stopPropagation(),
-  }, "🔗 " + shortUrl(url));
+  // Always render a card. If no OG data was fetched, buildLinkPreviewCard renders
+  // a minimal card with a link-icon banner so it stays visually consistent.
+  return buildLinkPreviewCard(url, preview || { title: "", description: "", image: "" });
 }
 
 function openDetail(p) {
@@ -1443,7 +1454,18 @@ function buildMediaEditor(initial = {}) {
   return {
     tilesArea,
     attachments,
-    getValues: () => {
+    // Async so we can resolve any link previews that haven't been fetched yet
+    // (e.g. user typed a URL and clicked Submit before the blur fetch finished).
+    getValues: async () => {
+      await Promise.all(state.links.map(async (l) => {
+        const url = (l.url || "").trim();
+        if (!url || l.preview) return;
+        if (isImageUrl(url) || youtubeEmbedUrl(url)) return;
+        try {
+          const p = await fetchLinkPreview(url);
+          if (p && (p.title || p.image)) l.preview = p;
+        } catch {}
+      }));
       const valid = state.links.filter((l) => (l.url || "").trim());
       const linkUrls = valid.map((l) => l.url.trim());
       const linkPreviews = valid.map((l) => l.preview || null);
@@ -1493,12 +1515,15 @@ function openComposer(defaultSectionId) {
     if (submitting) return;
     const title = titleInput.value.trim();
     const description = descInput.value.trim();
-    const v = editor.getValues();
-    if (!title && !description && v.imageDataUrls.length === 0 && v.linkUrls.length === 0 && !v.pdfPages) {
-      toast("Add a subject, description, image, or link", "error"); return;
-    }
     submitting = true;
     submitBtn.textContent = "Posting…";
+    const v = await editor.getValues();
+    if (!title && !description && v.imageDataUrls.length === 0 && v.linkUrls.length === 0 && !v.pdfPages) {
+      toast("Add a subject, description, image, or link", "error");
+      submitBtn.textContent = "Submit";
+      submitting = false;
+      return;
+    }
     try {
       await createPost(state.roomId, {
         title, description,
@@ -1550,19 +1575,41 @@ function buildLinkPreviewCard(url, preview) {
     rel: "noopener",
     onclick: (e) => e.stopPropagation(),
   });
-  if (preview.image) {
-    const img = document.createElement("img");
-    img.src = preview.image;
-    img.className = "link-preview-image";
-    img.loading = "lazy";
-    img.onerror = () => img.remove();
-    card.append(img);
+  const host = shortUrl(url);
+
+  function renderInto(p) {
+    card.innerHTML = "";
+    const hasImage = !!p.image;
+    const hasMeta = !!(p.title || p.description);
+    if (hasImage) {
+      const img = document.createElement("img");
+      img.src = p.image;
+      img.className = "link-preview-image";
+      img.loading = "lazy";
+      img.onerror = () => img.remove();
+      card.append(img);
+    } else if (!hasMeta) {
+      card.append(el("div", { class: "link-preview-icon" }, "🔗"));
+    }
+    const body = el("div", { class: "link-preview-body" });
+    const titleText = p.title && p.title !== host ? p.title : host;
+    body.append(el("div", { class: "link-preview-title" }, titleText));
+    if (p.description) body.append(el("div", { class: "link-preview-desc" }, truncate(p.description, 160)));
+    body.append(el("div", { class: "link-preview-host" }, host));
+    card.append(body);
   }
-  const body = el("div", { class: "link-preview-body" });
-  if (preview.title) body.append(el("div", { class: "link-preview-title" }, preview.title));
-  if (preview.description) body.append(el("div", { class: "link-preview-desc" }, truncate(preview.description, 160)));
-  body.append(el("div", { class: "link-preview-host" }, shortUrl(url)));
-  card.append(body);
+
+  renderInto(preview || { title: "", description: "", image: "" });
+
+  // If we don't have rich preview data yet, try to fetch it now and re-render the card.
+  // This makes old posts whose preview was never fetched get the rich card retroactively.
+  const hasAny = preview && (preview.title || preview.image || preview.description);
+  if (!hasAny) {
+    fetchLinkPreview(url).then((p) => {
+      if (p && (p.title || p.image)) renderInto(p);
+    }).catch(() => {});
+  }
+
   return card;
 }
 
@@ -1599,7 +1646,7 @@ function openEdit(p) {
     saving = true;
     saveBtn.textContent = "Saving…";
     try {
-      const v = editor.getValues();
+      const v = await editor.getValues();
       const patch = {
         title: titleInput.value.trim(),
         description: descInput.value.trim(),
