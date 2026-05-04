@@ -691,6 +691,8 @@ function buildOrphanColumn(orphans, isOnlyColumn) {
   } else if (state.user && isOnlyColumn) {
     header.append(el("div", { class: "section-actions" },
       el("button", { class: "btn-ghost", title: "Add post", onclick: (e) => { e.stopPropagation(); openComposer(null); } }, "➕"),
+      el("button", { class: "btn-ghost", title: "Rename — converts the default column into a real section", onclick: (e) => { e.stopPropagation(); openRenameUncategorizedModal(orphans); } }, "✏️"),
+      el("button", { class: "btn-ghost", title: "Delete", onclick: (e) => { e.stopPropagation(); toast("This is the default column — add another section first, then you can remove it.", "info"); } }, "🗑"),
     ));
   }
   col.append(header);
