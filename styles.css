@@ -166,6 +166,23 @@ a:hover { text-decoration: underline; }
 }
 #board-title-edit { font-size: 14px; }
 
+.exit-room-btn {
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  color: var(--foreground);
+  padding: 6px 12px;
+  border-radius: 999px;
+  font-size: 13px;
+  font-weight: 600;
+  margin-right: 4px;
+  flex-shrink: 0;
+}
+.exit-room-btn:hover {
+  background: var(--accent-soft);
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
 .online-status {
   display: inline-flex;
   align-items: center;

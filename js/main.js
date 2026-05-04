@@ -36,7 +36,15 @@ function boot() {
   wireOnlineStatus();
   document.getElementById("board-title-edit").onclick = openRoomTitleEditor;
   document.getElementById("announcement-edit").onclick = openAnnouncementEditor;
+  document.getElementById("exit-room").onclick = exitRoom;
   onAuthChange(handleAuthChange);
+}
+
+function exitRoom() {
+  teardownRoom();
+  state.roomId = null;
+  setRoomInURL(null);
+  showLanding();
 }
 
 function applyTheme() {
@@ -208,6 +216,7 @@ function showInRoomShell() {
   if (refreshBtn) refreshBtn.hidden = false;
   document.getElementById("announcement").classList.remove("hidden");
   document.getElementById("board-title-edit").hidden = false;
+  document.getElementById("exit-room").hidden = false;
   const board = document.getElementById("board");
   board.classList.remove("board-landing");
   board.innerHTML = "";
@@ -221,6 +230,7 @@ function showLanding() {
   if (refreshBtn) refreshBtn.hidden = true;
   document.getElementById("announcement").classList.add("hidden");
   document.getElementById("board-title-edit").hidden = true;
+  document.getElementById("exit-room").hidden = true;
   document.getElementById("board-title").textContent = "Padlet Classrooms";
   document.getElementById("board").classList.add("board-landing");
   renderLanding();
@@ -232,6 +242,7 @@ function showJoinPrompt(code) {
   document.getElementById("export-csv").hidden = true;
   document.getElementById("announcement").classList.add("hidden");
   document.getElementById("board-title-edit").hidden = true;
+  document.getElementById("exit-room").hidden = true;
   document.getElementById("board-title").textContent = "Join classroom " + code;
   document.getElementById("board").classList.add("board-landing");
   renderJoinForm(code);
