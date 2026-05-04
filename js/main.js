@@ -6,7 +6,6 @@ import {
   recordMembership, fetchMyRooms, deleteRoom,
   createSection, updateSection, deleteSection, subscribeSections,
 } from "./rooms.js";
-import { exportCSV } from "./admin.js";
 import { el, escapeHtml, showModal, closeModal, toast, formatRelativeTime, fileToDataUrl } from "./ui.js";
 
 const state = {
@@ -78,10 +77,6 @@ function toggleTheme() {
 function wireToolbar() {
   document.getElementById("search").addEventListener("input", (e) => { state.search = e.target.value; renderBoard(); });
   document.getElementById("sort").addEventListener("change", (e) => { state.sort = e.target.value; renderBoard(); });
-  document.getElementById("export-csv").addEventListener("click", () => {
-    exportCSV(state.posts);
-    toast("CSV downloaded", "success");
-  });
   document.getElementById("refresh-posts").addEventListener("click", () => {
     if (state._reattachSubscriptions) {
       state._reattachSubscriptions();
@@ -225,7 +220,6 @@ function showInRoomShell() {
 function showLanding() {
   document.getElementById("toolbar").hidden = true;
   document.getElementById("fab").hidden = true;
-  document.getElementById("export-csv").hidden = true;
   const refreshBtn = document.getElementById("refresh-posts");
   if (refreshBtn) refreshBtn.hidden = true;
   document.getElementById("announcement").classList.add("hidden");
@@ -239,7 +233,6 @@ function showLanding() {
 function showJoinPrompt(code) {
   document.getElementById("toolbar").hidden = true;
   document.getElementById("fab").hidden = true;
-  document.getElementById("export-csv").hidden = true;
   document.getElementById("announcement").classList.add("hidden");
   document.getElementById("board-title-edit").hidden = true;
   document.getElementById("exit-room").hidden = true;
@@ -526,8 +519,6 @@ function renderUserArea() {
   wrap.append(chip);
   wrap.append(el("button", { class: "btn-secondary btn", onclick: handleSignOut }, "Sign out"));
 
-  // Show export-csv only for trainer
-  document.getElementById("export-csv").hidden = !trainer;
   document.getElementById("announcement-edit").hidden = !trainer;
 }
 
