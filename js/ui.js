@@ -26,7 +26,7 @@ export function showModal(node, opts = {}) {
   const root = document.getElementById("modal-root");
   closeModal();
   const overlay = el("div", { class: "modal-overlay", onclick: (e) => { if (e.target === overlay && !opts.persistent) closeModal(); } });
-  const modal = el("div", { class: "modal" + (opts.wide ? " wide" : "") });
+  const modal = el("div", { class: "modal" + (opts.wide ? " wide" : "") + (opts.className ? " " + opts.className : "") });
   modal.append(node);
   overlay.append(modal);
   root.append(overlay);

@@ -597,9 +597,36 @@ function renderBoard() {
 
 function buildOrphanColumn(orphans, isOnlyColumn) {
   const col = el("section", { class: "section-column" });
-  col.append(el("div", { class: "section-header" },
+  const header = el("div", { class: "section-header" },
     el("h3", { class: "section-title" }, isOnlyColumn ? "Posts" : "Uncategorized"),
-  ));
+  );
+  if (state.user && !isOnlyColumn) {
+    header.append(el("div", { class: "section-actions" },
+      el("button", { class: "btn-ghost", title: "Add post", onclick: (e) => { e.stopPropagation(); openComposer(null); } }, "➕"),
+      el("button", { class: "btn-ghost", title: "Rename", onclick: (e) => { e.stopPropagation(); toast("Uncategorized is the default bucket — it can't be renamed.", "info"); } }, "✏️"),
+      el("button", { class: "btn-ghost", title: "Remove column (moves posts to first section)", onclick: async (e) => {
+        e.stopPropagation();
+        const firstSection = (state.sections || []).find((s) => !s.parentSectionId);
+        if (!firstSection) {
+          toast("No other section to move posts into.", "error");
+          return;
+        }
+        const n = orphans.length;
+        if (n > 0 && !confirm(`Move ${n} post${n === 1 ? "" : "s"} into "${firstSection.title || "Untitled"}" and remove the Uncategorized column?`)) return;
+        try {
+          await Promise.all(orphans.map((p) => updatePost(p.id, { sectionId: firstSection.id })));
+          toast(n > 0 ? `Moved ${n} post${n === 1 ? "" : "s"} to "${firstSection.title || "Untitled"}"` : "Column removed", "success");
+        } catch (err) {
+          toast("Move failed — only the author can move their own posts.", "error");
+        }
+      }}, "🗑"),
+    ));
+  } else if (state.user && isOnlyColumn) {
+    header.append(el("div", { class: "section-actions" },
+      el("button", { class: "btn-ghost", title: "Add post", onclick: (e) => { e.stopPropagation(); openComposer(null); } }, "➕"),
+    ));
+  }
+  col.append(header);
   if (state.user) {
     col.append(el("button", { class: "section-add-post", onclick: () => openComposer(null) },
       "+ Add post"));
@@ -1211,12 +1238,14 @@ function buildMediaEditor(initial = {}) {
     linkPreview: initial.linkPreview || null,
   };
 
-  const imageInput = el("input", { type: "file", accept: "image/*", multiple: true });
+  const imageInput = el("input", { type: "file", accept: "image/*", multiple: true, hidden: true });
   const imageList = el("div", { class: "image-list" });
-  const pdfInput = el("input", { type: "file", accept: "application/pdf" });
+  const pdfInput = el("input", { type: "file", accept: "application/pdf", hidden: true });
   const pdfStatus = el("div", { class: "pdf-status" });
-  const linkInput = el("input", { type: "url", placeholder: "Paste a link or YouTube URL (optional)" });
-  if (initial.linkUrl) linkInput.value = initial.linkUrl;
+  const linkInput = el("input", { type: "url", class: "composer-link-input", placeholder: "Paste a link or YouTube URL" });
+  const linkBar = el("div", { class: "composer-link-bar" }, linkInput);
+  if (initial.linkUrl) { linkInput.value = initial.linkUrl; }
+  else { linkBar.hidden = true; }
   const linkPreviewWrap = el("div", { class: "link-preview-wrap" });
   if (initial.linkPreview && initial.linkUrl) {
     linkPreviewWrap.append(buildLinkPreviewCard(initial.linkUrl, initial.linkPreview));
@@ -1305,20 +1334,42 @@ function buildMediaEditor(initial = {}) {
     }
   });
 
-  const fields = [
-    el("label", null, "Add image(s) — pick multiple at once or repeat"),
+  const tile = (icon, label, onClick, title) => el("button", {
+    type: "button",
+    class: "composer-tile",
+    title: title || label,
+    onclick: onClick,
+  },
+    el("span", { class: "composer-tile-icon" }, icon),
+    el("span", { class: "composer-tile-label" }, label),
+  );
+
+  const tiles = el("div", { class: "composer-tiles" },
+    tile("🖼️", "Image", () => imageInput.click(), "Upload one or more images"),
+    tile("📄", "PDF", () => pdfInput.click(), "Upload a PDF"),
+    tile("🔗", "Link", () => {
+      linkBar.hidden = !linkBar.hidden;
+      if (!linkBar.hidden) setTimeout(() => linkInput.focus(), 30);
+    }, "Add a link or YouTube URL"),
+  );
+
+  const tilesArea = el("div", { class: "composer-tiles-wrap" },
+    tiles,
+    el("div", { class: "composer-tiles-hint" }, "Add an image, PDF, or link"),
+  );
+
+  const attachments = el("div", { class: "composer-attachments" },
     imageInput,
-    imageList,
-    el("label", null, "Add a PDF (optional, replaces existing)"),
     pdfInput,
+    imageList,
     pdfStatus,
-    el("label", null, "Link / YouTube URL (optional)"),
-    linkInput,
+    linkBar,
     linkPreviewWrap,
-  ];
+  );
 
   return {
-    fields,
+    tilesArea,
+    attachments,
     getValues: () => ({
       imageDataUrls: state.images,
       pdfPages: state.pdfPages,
@@ -1330,8 +1381,8 @@ function buildMediaEditor(initial = {}) {
 
 function openComposer(defaultSectionId) {
   if (!state.user) return;
-  const titleInput = el("input", { type: "text", placeholder: "Title" });
-  const descInput = el("textarea", { placeholder: "What's your idea, reflection, or answer?" });
+  const titleInput = el("input", { type: "text", class: "composer-subject", placeholder: "Subject" });
+  const descInput = el("textarea", { class: "composer-body", placeholder: "Write something fantastic…" });
   const editor = buildMediaEditor();
 
   // Section dropdown — only shown when sections exist; sub-sections are indented
@@ -1357,13 +1408,13 @@ function openComposer(defaultSectionId) {
   }
 
   let submitting = false;
-  const submitBtn = el("button", { class: "btn", onclick: async () => {
+  const submitBtn = el("button", { class: "btn composer-submit", onclick: async () => {
     if (submitting) return;
     const title = titleInput.value.trim();
     const description = descInput.value.trim();
     const v = editor.getValues();
     if (!title && !description && v.imageDataUrls.length === 0 && !v.linkUrl && !v.pdfPages) {
-      toast("Add a title, description, image, or link", "error"); return;
+      toast("Add a subject, description, image, or link", "error"); return;
     }
     submitting = true;
     submitBtn.textContent = "Posting…";
@@ -1385,24 +1436,26 @@ function openComposer(defaultSectionId) {
     } catch (e) {
       console.error(e);
       toast("Failed to post: " + (e.message || e.code), "error");
-      submitBtn.textContent = "Post";
+      submitBtn.textContent = "Submit";
       submitting = false;
     }
-  }}, "Post");
+  }}, "Submit");
 
-  const node = el("div", null,
-    el("h2", null, "New post"),
-    el("label", null, "Title"), titleInput,
-    el("label", null, "Description"), descInput,
-    sectionSelect ? el("label", null, "Section") : null,
-    sectionSelect,
-    ...editor.fields,
-    el("div", { class: "modal-actions" },
-      el("button", { class: "btn btn-secondary", onclick: closeModal }, "Cancel"),
+  const node = el("div", { class: "composer" },
+    el("div", { class: "composer-header" },
+      el("button", { class: "composer-close-btn", onclick: closeModal, title: "Close", type: "button" }, "×"),
       submitBtn,
     ),
+    titleInput,
+    descInput,
+    editor.tilesArea,
+    editor.attachments,
+    sectionSelect ? el("div", { class: "composer-section-row" },
+      el("span", { class: "composer-section-label" }, "Section"),
+      sectionSelect,
+    ) : null,
   );
-  showModal(node);
+  showModal(node, { className: "composer-modal" });
   setTimeout(() => titleInput.focus(), 50);
 }
 
@@ -1431,9 +1484,9 @@ function buildLinkPreviewCard(url, preview) {
 }
 
 function openEdit(p) {
-  const titleInput = el("input", { type: "text" });
+  const titleInput = el("input", { type: "text", class: "composer-subject", placeholder: "Subject" });
   titleInput.value = p.title || "";
-  const descInput = el("textarea");
+  const descInput = el("textarea", { class: "composer-body", placeholder: "Write something fantastic…" });
   descInput.value = p.description || "";
 
   // Existing images: prefer the new array; fall back to the legacy single field
@@ -1450,7 +1503,7 @@ function openEdit(p) {
   });
 
   let saving = false;
-  const saveBtn = el("button", { class: "btn", onclick: async () => {
+  const saveBtn = el("button", { class: "btn composer-submit", onclick: async () => {
     if (saving) return;
     saving = true;
     saveBtn.textContent = "Saving…";
@@ -1464,8 +1517,6 @@ function openEdit(p) {
         linkUrl: v.linkUrl,
         linkPreview: v.linkPreview || null,
       };
-      // If a new PDF was picked, replacing PDFs is complex (would need to delete old pages
-      // and write new ones). For now, surface a friendly note.
       if (v.pdfPages && v.pdfPages.length > 0) {
         toast("PDF replacement not supported in edit yet — delete the post and recreate to change the PDF.", "error");
         saveBtn.textContent = "Save";
@@ -1482,16 +1533,16 @@ function openEdit(p) {
     }
   }}, "Save");
 
-  const node = el("div", null,
-    el("h2", null, "Edit post"),
-    el("label", null, "Title"), titleInput,
-    el("label", null, "Description"), descInput,
-    ...editor.fields,
-    p.pdfPageCount ? el("p", { class: "pdf-note" }, `This post has a ${p.pdfPageCount}-page PDF attached. To change it, delete the post and create a new one.`) : null,
-    el("div", { class: "modal-actions" },
-      el("button", { class: "btn btn-secondary", onclick: closeModal }, "Cancel"),
+  const node = el("div", { class: "composer" },
+    el("div", { class: "composer-header" },
+      el("button", { class: "composer-close-btn", onclick: closeModal, title: "Close", type: "button" }, "×"),
       saveBtn,
     ),
+    titleInput,
+    descInput,
+    editor.tilesArea,
+    editor.attachments,
+    p.pdfPageCount ? el("p", { class: "pdf-note" }, `This post has a ${p.pdfPageCount}-page PDF attached. To change it, delete the post and create a new one.`) : null,
   );
-  showModal(node);
+  showModal(node, { className: "composer-modal" });
 }
